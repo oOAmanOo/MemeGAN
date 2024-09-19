@@ -7,7 +7,7 @@ import torch.nn as nn
 from typing import Union, List
 from PIL import Image
 import models
-from transformers.adapters import LoRAConfig, AdapterConfig, PrefixTuningConfig, UniPELTConfig
+from adapters import LoRAConfig, AdapterConfig, PrefixTuningConfig, UniPELTConfig
 
 def load_model(model_name: str, isTrain: bool = False):
     with open(os.path.join('configs/', model_name + '.yaml'), 'r') as f:

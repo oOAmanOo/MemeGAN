@@ -29,7 +29,7 @@ class Screeb2WordsDataset(VisionDataset):
         s2w_dir (string): directory where Screen2words dataset is stored.
         transform (callable, optional): A function/transform that takes in a PIL image
             and returns a transformed version. E.g, ``transforms.PILToTensor``
-        text_processor (callable, optional): A function/transform that add prompt in the beginnoing of the caption.
+        text_processor (callable, optional): A function/transform that add prompt in the beginning of the caption.
         split_dir (string): Directory contain how to split.
         split_type: split type, one of 'TRAIN', 'VAL', or 'TEST'
         """

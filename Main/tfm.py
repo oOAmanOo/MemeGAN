@@ -1,7 +1,7 @@
 from torchvision.transforms.functional import InterpolationMode
 from lavis.processors.randaugment import RandomAugment
 from torchvision import transforms
-def tfm(type = 'full',image_size = 384, min_scale=0.5, max_scale=1.0, mean = (0.48145466, 0.4578275, 0.40821073), std = (0.26862954, 0.26130258, 0.27577711)):
+def tfm(type = 'full',image_size = 256, min_scale=0.5, max_scale=1.0, mean = (0.48145466, 0.4578275, 0.40821073), std = (0.26862954, 0.26130258, 0.27577711)):
     if type == 'crop':
         return {'train' : transforms.Compose(
             [

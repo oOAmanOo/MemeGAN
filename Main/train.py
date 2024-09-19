@@ -1,4 +1,3 @@
-#%%
 import os
 import torch
 from torch.utils.data import DataLoader
@@ -6,14 +5,14 @@ from transformers import get_cosine_schedule_with_warmup
 import numpy as np
 import random
 import argparse
+import pandas as pd
+from sklearn.model_selection import train_test_split
 # This is for the progress bar.
 from tqdm.auto import tqdm
-# own dataset & scorer utils implementation
-from s2w_dataset import Screeb2WordsDataset
 import scorer
 from loader import load_model
+from extractor import text_extraction
 
-#%%
 def train(args):
     # set random args.seed
     random.seed(args.seed)
@@ -36,33 +35,42 @@ def train(args):
     if args.checkpoint_path:
         model.load_state_dict(torch.load(args.checkpoint_path))
         print(f"Load checkpoint from {args.checkpoint_path}")
-    
+
     model.to(device)
 
     # training preprocessor
-    import tfm
-    vis_processors = tfm.tfm()
 
+    if args.img - dir == 'Oxford_HIC':
+        dirPath = '../Data/Oxford_HIC/oxford_hic_data.csv'
+        imgPath = '../Data/Oxford_HIC/oxford_img/'
+    else:
+        dirPath = '../Data/Instagram/Filter_' + args.imgDir + '.csv'
+        imgPath = '../Data/Instagram/' + args.imgDir + '_img.csv'
     # load dataset
-    train_dataset = Screeb2WordsDataset(args.img_dir, args.s2w_dir, 'TRAIN', vis_processors, None, args.caption_type, args.debug)
-    train_loader = DataLoader(train_dataset, batch_size=args.batch_size, shuffle=True, num_workers=2, collate_fn=train_dataset.collate_fn)
-    valid_dataset = Screeb2WordsDataset(args.img_dir, args.s2w_dir, 'VALID', vis_processors, None, 'EVAL', args.debug)
-    valid_loader = DataLoader(valid_dataset, batch_size=args.batch_size, shuffle=False, num_workers=2, collate_fn=valid_dataset.collate_fn)
+    dataset = pd.read_csv(dirPath)
+    dataset = text_extraction(dataset, imgPath)
 
-    # Gradient Accumulation
+
+    train, test = train_test_split(dataset, test_size=0.2, random_state=42)
+    train_loader = DataLoader(train, batch_size=args.batch_size, shuffle=True, num_workers=2)
+    valid_loader = DataLoader(test, batch_size=args.batch_size, shuffle=False, num_workers=2)
+
+    # Gradient Accumulation  梯度累積
     bs = args.batch_size * args.accumulation_steps
 
     # Define the loss function and optimizer
     # criterion = nn.CrossEntropyLoss()
     # optimizer = optim.Adam(params, lr=args.learning_rate)
     optimizer = torch.optim.AdamW(params=model.parameters(), lr=args.learning_rate, weight_decay=args.weight_decay)
-    num_training_steps = len(train_loader) / args.accumulation_steps * args.num_epochs 
+    num_training_steps = len(train_loader) / args.accumulation_steps * args.num_epochs
     num_warmup_steps = int(0.1 * num_training_steps)
-    scheduler = get_cosine_schedule_with_warmup(optimizer, num_warmup_steps=num_warmup_steps, num_training_steps=num_training_steps)
+    scheduler = get_cosine_schedule_with_warmup(optimizer, num_warmup_steps=num_warmup_steps,
+                                                num_training_steps=num_training_steps)
 
-    #%%
-    with open(f"./log/{args.exp_name}_bs{bs}_{args.caption_type}_log.txt","a") as f:
-        f.write(f"bs = {bs}({args.batch_size}*{args.accumulation_steps}), num_epoch = {args.num_epochs},\nlr = {args.learning_rate}, wd = {args.weight_decay},\npatience = {args.patience}, prompt = {model.prompt}\n")
+    # %%
+    with open(f"./log/{args.exp_name}_bs{bs}_{args.caption_type}_log.txt", "a") as f:
+        f.write(
+            f"bs = {bs}({args.batch_size}*{args.accumulation_steps}), num_epoch = {args.num_epochs},\nlr = {args.learning_rate}, wd = {args.weight_decay},\npatience = {args.patience}, prompt = {model.prompt}\n")
 
     for epoch in range(args.num_epochs):
         # ---------- Training ----------
@@ -83,7 +91,7 @@ def train(args):
             loss.backward()
 
             # Gradient Accumulation
-            if (index + 1) % args.accumulation_steps == 0 or (index+1) == len(train_loader):
+            if (index + 1) % args.accumulation_steps == 0 or (index + 1) == len(train_loader):
                 # Clip the gradient norms for stable training.
                 # grad_norm = nn.utils.clip_grad_norm_(model.parameters(), max_norm=10.0)
 
@@ -120,19 +128,23 @@ def train(args):
         cocoeval = scorer.Scorers(caption_predictions, caption_references)
         total_score = cocoeval.compute_scores()
         # Print the information.
-        print(f"[ Valid | {epoch + 1:03d}/{args.num_epochs:03d} ] bleu = {total_score['bleu'][3]:.5f}, CIDEr = {total_score['CIDEr']:.5f}, RougeL = {total_score['ROUGE_L']:.5f}")
+        print(
+            f"[ Valid | {epoch + 1:03d}/{args.num_epochs:03d} ] bleu = {total_score['bleu'][3]:.5f}, CIDEr = {total_score['CIDEr']:.5f}, RougeL = {total_score['ROUGE_L']:.5f}")
         # update logs
         valid_score = total_score['bleu'][3] + total_score['CIDEr']
         if valid_score > best_score:
-            with open(f"./log/{args.exp_name}_bs{bs}_{args.caption_type}_log.txt","a") as f:
-                f.write(f"[ Valid | {epoch + 1:03d}/{args.num_epochs:03d} ] bleu = {total_score['bleu'][3]:.5f}, CIDEr = {total_score['CIDEr']:.5f}, RougeL = {total_score['ROUGE_L']:.5f} -> best\n")
+            with open(f"./log/{args.exp_name}_bs{bs}_{args.caption_type}_log.txt", "a") as f:
+                f.write(
+                    f"[ Valid | {epoch + 1:03d}/{args.num_epochs:03d} ] bleu = {total_score['bleu'][3]:.5f}, CIDEr = {total_score['CIDEr']:.5f}, RougeL = {total_score['ROUGE_L']:.5f} -> best\n")
         else:
-            with open(f"./log/{args.exp_name}_bs{bs}_{args.caption_type}_log.txt","a") as f:
-                f.write(f"[ Valid | {epoch + 1:03d}/{args.num_epochs:03d} ] bleu = {total_score['bleu'][3]:.5f}, CIDEr = {total_score['CIDEr']:.5f}, RougeL = {total_score['ROUGE_L']:.5f}\n")
+            with open(f"./log/{args.exp_name}_bs{bs}_{args.caption_type}_log.txt", "a") as f:
+                f.write(
+                    f"[ Valid | {epoch + 1:03d}/{args.num_epochs:03d} ] bleu = {total_score['bleu'][3]:.5f}, CIDEr = {total_score['CIDEr']:.5f}, RougeL = {total_score['ROUGE_L']:.5f}\n")
         # save models
         if valid_score > best_score:
             print(f"Best model found at epoch {epoch}, saving model")
-            torch.save(model.state_dict(), f"{args.exp_name}_bs{bs}_{args.caption_type}.ckpt") # only save best to prevent output memory exceed error
+            torch.save(model.state_dict(),
+                       f"{args.exp_name}_bs{bs}_{args.caption_type}.ckpt")  # only save best to prevent output memory exceed error
             best_score = valid_score
             stale = 0
         else:
@@ -141,12 +153,12 @@ def train(args):
                 print(f"No improvment {args.patience} consecutive epochs, early stopping at {epoch}")
                 break
 
-#%%
+
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('--debug', type=bool, default=0,
                         help='debug mode for testing code')
-    parser.add_argument('-lr','--learning-rate' , type=float, default=5e-5,
+    parser.add_argument('-lr', '--learning-rate', type=float, default=5e-5,
                         help='learning rate during training')
     parser.add_argument('-wd', '--weight-decay', type=float, default=0.1,
                         help='weight decay during training')
@@ -158,9 +170,13 @@ if __name__ == '__main__':
                         help='gradient accumulation step')
     parser.add_argument('-p', '--patience', type=int, default=15,
                         help='')
-    parser.add_argument('--img-dir', type=str, default='/data/rico/combined/',
+    # parser.add_argument('--img-dir', type=str, default='/data/rico/combined/',
+    #                     help='image directory where Rico dataset is stored')
+    # parser.add_argument('--s2w-dir', type=str, default='/data/screen2words/',
+    #                     help='directory where Screen2words dataset is stored')
+    parser.add_argument('--imgDir', type=str, default='/data/rico/combined/',
                         help='image directory where Rico dataset is stored')
-    parser.add_argument('--s2w-dir', type=str, default='/data/screen2words/',
+    parser.add_argument('--txtDir', type=str, default='/data/screen2words/',
                         help='directory where Screen2words dataset is stored')
     parser.add_argument('-c', '--caption-type', type=str, default='FULL',
                         help='type of select caption in training data.\n \
@@ -171,7 +187,7 @@ if __name__ == '__main__':
                         help='path to model checkpoint')
     parser.add_argument('-m', '--model', type=str, default='blip_caption',
                         help='model name')
-    parser.add_argument('-name', '--exp-name',type=str, default='test',
+    parser.add_argument('-name', '--exp-name', type=str, default='test',
                         help='experiment name')
     parser.add_argument('--seed', type=int, default=1126,
                         help='set random seed')
