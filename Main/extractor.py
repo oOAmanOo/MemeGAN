@@ -1,48 +1,41 @@
-import torch
 import torch.nn as nn
-import torch.optim as optim
 import pandas as pd
-import numpy as np
 from torch.distributed.pipelining import pipeline
-import matplotlib.pyplot as plt
-from torch.utils.data import Dataset, DataLoader
-from sklearn.preprocessing import OneHotEncoder
-from transformers import BertTokenizer
-from transformers import BertModel
-from sklearn.model_selection import train_test_split
+
 from transformers import pipeline
-from transformers import AutoTokenizer, AutoModelForSequenceClassification
+from transformers import AutoTokenizer
 from tqdm import tqdm
 from transformers import AutoImageProcessor, Swinv2Model
 from PIL import Image
 import torch
-from torch.utils.data import DataLoader
 
-def text_extraction(data, imgPath):
+def addImagePath(data, imgPath):
+    data['image_id'] = data['image_id'].apply(lambda x: imgPath + str(x) + '.jpg')
+    return data
 
+def textExtraction(text_data):
+    # 載入模型
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
     pipe = pipeline("text-classification", model="cardiffnlp/twitter-roberta-base-emoji", device=0)
     tokenizer = AutoTokenizer.from_pretrained("cardiffnlp/twitter-roberta-base-emoji")
+    vocab_size = 50265  # 词汇表大小
+    embedding_dim = 768  # 嵌入维度，与你的图像嵌入维度相同
+    text_embedding = nn.Embedding(vocab_size, embedding_dim).to(device)
 
-    # 将标题字段转换为tokens
-    def tokenize_bert(words):
-        # 使用BERT Tokenizer对标题进行tokenize
-        tokens = tokenizer(words, truncation=True, padding='max_length', max_length=768,return_tensors='pt')
-        return tokens['input_ids'].tolist()[0]
-
-    new_data = pd.DataFrame()
-    new_data['text'] = data['caption'].apply(tokenize_bert)
-    new_data = new_data['text'].apply(pd.Series)
-    new_data.columns = ['text_{}'.format(i) for i in range(new_data.shape[1])]
-    new_data['image_id'] = data['image_id'].apply(lambda x: imgPath + str(x) + '.jpg')
-    new_data['funny_score'] = data['funny_score']
-
-    return new_data
+    all_features = []
+    with tqdm(text_data) as pbar:
+        for text in (text_data):
+            tokens = tokenizer(text, truncation=True, padding='max_length', max_length=373, return_tensors='pt')
+            output = text_embedding(tokens['input_ids'].to(device))
+            output = output.cpu()
+            all_features.append(output)
+            pbar.update(1)
+        return torch.cat(all_features)
 
 
 # 定義批量處理和提取特徵的函數
-def image_extraction(image_data):
+def imageExtraction(image_data):
     # 加載 Swinv2 模型和處理器
     image_processor = AutoImageProcessor.from_pretrained("microsoft/swinv2-tiny-patch4-window8-256")
     swin = Swinv2Model.from_pretrained("microsoft/swinv2-tiny-patch4-window8-256")
