@@ -2,6 +2,7 @@ import torch.nn as nn
 from transformers import AutoTokenizer
 from tqdm import tqdm
 from transformers import AutoImageProcessor, Swinv2Model
+import torch.nn.functional as F
 from PIL import Image
 import torch
 
@@ -24,9 +25,11 @@ def textExtraction(text_data):
     all_features = []
     with tqdm(text_data) as pbar:
         for text in (text_data):
-            tokens = tokenizer(text, truncation=True, padding='max_length', max_length=373, return_tensors='pt')
+            tokens = tokenizer(text, truncation=True, padding='longest', max_length=373, return_tensors='pt')
             output = text_embedding(tokens['input_ids'])
-            all_features.append(output)
+            linear = torch.nn.Linear(output.shape[1], 64)
+            projected_output = linear(output.transpose(1, 2)).transpose(1, 2)
+            all_features.append(projected_output)
             pbar.update(1)
         return torch.cat(all_features)
 
