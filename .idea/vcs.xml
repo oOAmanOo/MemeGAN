@@ -4,6 +4,7 @@
     <mapping directory="$PROJECT_DIR$" vcs="Git" />
     <mapping directory="$PROJECT_DIR$/Citations/AttnGAN" vcs="Git" />
     <mapping directory="$PROJECT_DIR$/Citations/BLIP-Adapter" vcs="Git" />
+    <mapping directory="$PROJECT_DIR$/Citations/CLIP_prefix_caption" vcs="Git" />
     <mapping directory="$PROJECT_DIR$/Citations/DF-GAN" vcs="Git" />
     <mapping directory="$PROJECT_DIR$/Citations/Oxford_HIC" vcs="Git" />
     <mapping directory="$PROJECT_DIR$/Citations/StackGAN" vcs="Git" />
