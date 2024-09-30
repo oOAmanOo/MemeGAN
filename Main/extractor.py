@@ -29,7 +29,7 @@ def textExtraction(text_data):
     all_features = []
     with tqdm(text_data) as pbar:
         for text in (text_data):
-            tokens = tokenizer(text, truncation=True, padding='longest', max_length=373, return_tensors='pt')
+            tokens = tokenizer(text, padding='longest', return_tensors='pt')
             output = text_embedding(tokens['input_ids'])
             linear = torch.nn.Linear(output.shape[1], 64)
             projected_output = linear(output.transpose(1, 2)).transpose(1, 2)
