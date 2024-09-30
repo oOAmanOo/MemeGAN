@@ -49,10 +49,8 @@ def textExtractReverse(data):
     tokenizer_gemma = AutoTokenizer.from_pretrained("google/gemma-2b")
     prompt = "Create a funny meme using the following text as the foundation for the joke. The meme should creatively incorporate humor that is relatable and witty, matching the tone of the provided content. Make sure to blend the text with an amusing visual representation that enhances the punchline: "
     all_features = []
-    with tqdm(reverse) as pbar:
-        for i, text in enumerate(reverse):
-            reverse[i] = prompt + text
-            pbar.update(1)
+    for i, text in enumerate(reverse):
+        reverse[i] = prompt + text
     tokens = tokenizer_gemma(reverse, padding='max_length', max_length=256, return_tensors='pt')
     all_features.append(tokens['input_ids'])
     return torch.cat(all_features)
