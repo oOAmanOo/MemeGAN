@@ -1,3 +1,7 @@
+from xml.sax.handler import all_features
+
+from lib2to3.btm_utils import tokens
+
 import torch.nn as nn
 from transformers import AutoTokenizer
 from tqdm import tqdm
@@ -39,9 +43,19 @@ def textExtractReverse(data):
 
     ###### twitter-roberta-base-emoji ######
     tokenizer = AutoTokenizer.from_pretrained("cardiffnlp/twitter-roberta-base-emoji")
-
-    indices = tokenizer.batch_decode(data.squeeze(-1), skip_special_tokens=True)
-    return indices
+    # reverse the token
+    reverse = tokenizer.batch_decode(data.squeeze(-1), skip_special_tokens=True)
+    # tokenize with gemma-2b
+    tokenizer_gemma = AutoTokenizer.from_pretrained("google/gemma-2b")
+    prompt = "Create a funny meme using the following text as the foundation for the joke. The meme should creatively incorporate humor that is relatable and witty, matching the tone of the provided content. Make sure to blend the text with an amusing visual representation that enhances the punchline: "
+    all_features = []
+    with tqdm(reverse) as pbar:
+        for i, text in enumerate(reverse):
+            reverse[i] = prompt + text
+            pbar.update(1)
+    tokens = tokenizer_gemma(reverse, padding='max_length', max_length=256, return_tensors='pt')
+    all_features.append(tokens['input_ids'])
+    return torch.cat(all_features)
 
 # 定義批量處理和提取特徵的函數
 def imageExtraction(image_data):
