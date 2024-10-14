@@ -463,14 +463,8 @@ class BertLayer(nn.Module):
                     attention_output,
                     attention_mask,
                     head_mask,
-                    encoder_hidden_states[
-                        (self.layer_num - self.fusion_layer + 1)
-                        % len(encoder_hidden_states)
-                        ],
-                    encoder_attention_mask[
-                        (self.layer_num - self.fusion_layer + 1)
-                        % len(encoder_hidden_states)
-                        ],
+                    encoder_hidden_states[(self.layer_num - self.fusion_layer + 1) % len(encoder_hidden_states)],
+                    encoder_attention_mask[(self.layer_num - self.fusion_layer + 1) % len(encoder_hidden_states)],
                     output_attentions=output_attentions,
                     is_co_attention=1,
                 )
@@ -481,14 +475,8 @@ class BertLayer(nn.Module):
                     attention_output,
                     attention_mask,
                     head_mask,
-                    encoder_hidden_states[
-                        (self.layer_num - self.fusion_layer)
-                        % len(encoder_hidden_states)
-                        ],
-                    encoder_attention_mask[
-                        (self.layer_num - self.fusion_layer)
-                        % len(encoder_hidden_states)
-                        ],
+                    encoder_hidden_states[(self.layer_num - self.fusion_layer) % len(encoder_hidden_states)],
+                    encoder_attention_mask[(self.layer_num - self.fusion_layer) % len(encoder_hidden_states)],
                     output_attentions=output_attentions,
                     is_co_attention= 2,
                 )
@@ -540,15 +528,15 @@ class BertLayer(nn.Module):
 
         return text_outputs, image_outputs
 
-def text_feed_forward_chunk(self, attention_output):
-    intermediate_output = self.text_intermediate(attention_output)
-    layer_output = self.text_output(intermediate_output, attention_output)
-    return layer_output
+    def text_feed_forward_chunk(self, attention_output):
+        intermediate_output = self.text_intermediate(attention_output)
+        layer_output = self.text_output(intermediate_output, attention_output)
+        return layer_output
 
-def image_feed_forward_chunk(self, attention_output):
-    intermediate_output = self.image_intermediate(attention_output)
-    layer_output = self.image_output(intermediate_output, attention_output)
-    return layer_output
+    def image_feed_forward_chunk(self, attention_output):
+        intermediate_output = self.image_intermediate(attention_output)
+        layer_output = self.image_output(intermediate_output, attention_output)
+        return layer_output
 
 class BertEncoder(nn.Module):
     def __init__(self, config):
@@ -573,13 +561,15 @@ class BertEncoder(nn.Module):
             return_dict=True,
             mode="multimodal",
     ):
-        all_hidden_states = () if output_hidden_states else None
-        all_self_attentions = () if output_attentions else None
-        all_cross_attentions = (
-            () if output_attentions and self.config.add_cross_attention else None
-        )
+        all_hidden_states_text = () if output_hidden_states else None
+        all_hidden_states_image = () if output_hidden_states else None
+        all_self_attentions_text = () if output_attentions else None
+        all_self_attentions_image = () if output_attentions else None
+        all_cross_attentions = () if output_attentions and self.config.add_cross_attention else None
 
-        next_decoder_cache = () if use_cache else None
+        next_decoder_cache_text = () if use_cache else None
+        next_decoder_cache_image = () if use_cache else None
+
 
         try:
             # ALBEF
@@ -604,10 +594,12 @@ class BertEncoder(nn.Module):
 
         # compatibility for ALBEF and BLIP
         # for i in range(self.config.num_hidden_layers):
+        layer_text_outputs = None
         for i in range(start_layer, output_layer):
             layer_module = self.layer[i]
             if output_hidden_states:
-                all_hidden_states = all_hidden_states + (hidden_states,)
+                all_hidden_states_text = all_hidden_states_text + (hidden_states,)
+                all_hidden_states_image = all_hidden_states_image + (hidden_states,)
 
             layer_head_mask = head_mask[i] if head_mask is not None else None
             past_key_value = past_key_values[i] if past_key_values is not None else None
@@ -627,17 +619,24 @@ class BertEncoder(nn.Module):
 
                     return custom_forward
 
-                layer_outputs = torch.utils.checkpoint.checkpoint(
+                if(layer_text_outputs is not None):
+                    input_hidden_states = layer_text_outputs[0]
+                    input_attention_mask = layer_text_outputs[1]
+                else:
+                    input_hidden_states = encoder_hidden_states
+                    input_attention_mask = encoder_attention_mask
+
+                layer_text_outputs, layer_image_outputs= torch.utils.checkpoint.checkpoint(
                     create_custom_forward(layer_module),
                     hidden_states,
                     attention_mask,
                     layer_head_mask,
-                    encoder_hidden_states,
-                    encoder_attention_mask,
+                    input_hidden_states,
+                    input_attention_mask,
                     mode=mode,
                 )
             else:
-                layer_outputs = layer_module(
+                layer_text_outputs, layer_image_outputs = layer_module(
                     hidden_states,
                     attention_mask,
                     layer_head_mask,
@@ -648,21 +647,28 @@ class BertEncoder(nn.Module):
                     mode=mode,
                 )
 
-            hidden_states = layer_outputs[0]
+            hidden_states = layer_text_outputs[0]
             if use_cache:
-                next_decoder_cache += (layer_outputs[-1],)
+                next_decoder_cache_text += (layer_text_outputs[-1],)
+                next_decoder_cache_image += (layer_image_outputs[-1],)
             if output_attentions:
-                all_self_attentions = all_self_attentions + (layer_outputs[1],)
+                all_self_attentions_text = all_self_attentions_text + (layer_text_outputs[1],)
+                all_self_attentions_image = all_self_attentions_image + (layer_image_outputs[1],)
 
         if output_hidden_states:
-            all_hidden_states = all_hidden_states + (hidden_states,)
+            all_hidden_states_text = all_hidden_states_text + (hidden_states,)
+            all_hidden_states_image = all_hidden_states_image + (hidden_states,)
+            all_hidden_states = all_hidden_states_text + all_hidden_states_image
 
+        all_self_attentions = all_self_attentions_text + all_self_attentions_image
+        next_decoder_cache = next_decoder_cache_text + next_decoder_cache_image
         if not return_dict:
             return tuple(
                 v
                 for v in [
                     hidden_states,
-                    next_decoder_cache,
+                    next_decoder_cache_text,
+                    next_decoder_cache_image,
                     all_hidden_states,
                     all_self_attentions,
                     all_cross_attentions,
