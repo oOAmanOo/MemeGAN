@@ -1,6 +1,6 @@
 from xml.sax.handler import all_features
 
-
+import numpy as np
 import torch.nn as nn
 from transformers import AutoTokenizer
 from transformers import AutoImageProcessor, Swinv2Model
@@ -21,12 +21,12 @@ def textExtraction(text_data):
     text_embedding = nn.Embedding(vocab_size, embedding_dim)
 
     all_features = []
-    for text in (text_data):
-        tokens = tokenizer(text, padding='longest', return_tensors='pt')
-        output = text_embedding(tokens['input_ids'])
-        linear = torch.nn.Linear(output.shape[1], 64)
-        projected_output = linear(output.transpose(1, 2)).transpose(1, 2)
-        all_features.append(projected_output)
+    # for text in (text_data):
+    tokens = tokenizer(text_data, padding='longest', return_tensors='pt')
+    output = text_embedding(tokens['input_ids'])
+    linear = torch.nn.Linear(output.shape[1], 64)
+    projected_output = linear(output.transpose(1, 2)).transpose(1, 2)
+    all_features.append(projected_output)
     return torch.cat(all_features)
 
 def textExtractReverse(data):
@@ -45,15 +45,15 @@ def textExtractReverse(data):
     # tokenize with gemma-2b
     tokenizer_gemma = AutoTokenizer.from_pretrained("google/gemma-2-2b-it")
     prompt = "Write a humor memetic post for Instagram with the following elements: "
-    all_features = []
+    # all_features = []
     for i, text in enumerate(reverse):
         text = text.replace("<pad>", " ").replace("  ", " ")
         text = text.split()
         text = ', '.join(text)
         reverse[i] = prompt + text + "."
     tokens = tokenizer_gemma(reverse, padding='max_length', max_length=64, return_tensors='pt')
-    all_features.append(tokens['input_ids'])
-    return torch.cat(all_features)
+    # all_features.append(tokens['input_ids'])
+    return tokens['input_ids']
 
 # 定義批量處理和提取特徵的函數
 def imageExtraction(image_data):
@@ -68,20 +68,21 @@ def imageExtraction(image_data):
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     swin.to(device)
 
-    all_features = []
-    for image_path in (image_data):
-        with torch.no_grad():
-            # 加載並預處理圖像
-            image = Image.open(image_path)
-            # 使用 image_processor 將 batch 圖片處理成適合模型的格式
-            inputs = image_processor(image, return_tensors="pt")
-            # 將 inputs 放到 GPU 上（如果可用）
-            inputs.to(device)
-            # 獲取 Swinv2 模型的輸出
-            outputs = swin(**inputs)
-            last_hidden_states = outputs.last_hidden_state
-            # 儲存特徵
-            last_hidden_states = last_hidden_states.cpu()
-            all_features.append(last_hidden_states)
-    return torch.cat(all_features)
+    # all_features = []
+    # for image_path in (image_data):
+    with torch.no_grad():
+        # 加載並預處理圖像
+        image = Image.open(image_data)
+        # print(np.array(image).shape)
+        # 使用 image_processor 將 batch 圖片處理成適合模型的格式
+        inputs = image_processor(image, return_tensors="pt")
+        # 將 inputs 放到 GPU 上（如果可用）
+        inputs.to(device)
+        # 獲取 Swinv2 模型的輸出
+        outputs = swin(**inputs)
+        last_hidden_states = outputs.last_hidden_state
+        # 儲存特徵
+        last_hidden_states = last_hidden_states.cpu()
+        # all_features.append(last_hidden_states)
+    return last_hidden_states
 
