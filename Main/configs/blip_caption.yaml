@@ -1,0 +1,25 @@
+ # Copyright (c) 2022, salesforce.com, inc.
+ # All rights reserved.
+ # SPDX-License-Identifier: BSD-3-Clause
+ # For full license text, see the LICENSE file in the repo root or https://opensource.org/licenses/BSD-3-Clause
+
+model:
+  name: blip_caption
+  args:
+    max_txt_len: 20
+# vit encoder
+    vit_type: "base"
+# bert config
+    med_config_path: "configs/med_config.json"
+# generation configs
+    prompt: "a picture of "
+# argument for partial tuning
+# vit adapter ("vit", "vit_grayscale")
+    # adapter_type: "vit"
+# bert adapter ("bottleneck_adapter", "lora_adapter", "prefix_tuning", "unipelt" , or others in adapterhub)
+    bert_adapter: "lora_adapter"
+# visual_projection ("linear", "ViT_block")
+    visual_projection: "ViT_block"
+# tune whole language model or not
+    # tune_language: true
+  checkpoint_url: "https://storage.googleapis.com/sfr-vision-language-research/LAVIS/models/BLIP/blip_coco_caption_base.pth"
