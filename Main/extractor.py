@@ -1,57 +1,57 @@
 from xml.sax.handler import all_features
 
-from lib2to3.btm_utils import tokens
 
 import torch.nn as nn
 from transformers import AutoTokenizer
-from tqdm import tqdm
 from transformers import AutoImageProcessor, Swinv2Model
-import torch.nn.functional as F
 from PIL import Image
 import torch
+from transformers import AutoConfig
 
 def addImagePath(data, imgPath):
     data['image_id'] = data['image_id'].apply(lambda x: imgPath + str(x) + '.jpg')
     return data
 
 def textExtraction(text_data):
-    ##### google/gemma-2b #####
-    # tokenizer = AutoTokenizer.from_pretrained("google/gemma-2b")
-    # vocab_size = 256128  # 词汇表大小
-
-    ###### twitter-roberta-base-emoji ######
-    tokenizer = AutoTokenizer.from_pretrained("cardiffnlp/twitter-roberta-base-emoji")
-    vocab_size = 50265  # 詞彙表大小
+    tokenizer = AutoTokenizer.from_pretrained("google/gemma-2-2b-it")
+    gemmaConfig = AutoConfig.from_pretrained('google/gemma-2-2b-it')
+    vocab_size = gemmaConfig.vocab_size  # 詞彙表大小
 
     embedding_dim = 768  # 嵌入维度，與你的圖片嵌入维度相同
     text_embedding = nn.Embedding(vocab_size, embedding_dim)
 
     all_features = []
-    with tqdm(text_data) as pbar:
-        for text in (text_data):
-            tokens = tokenizer(text, padding='longest', return_tensors='pt')
-            output = text_embedding(tokens['input_ids'])
-            linear = torch.nn.Linear(output.shape[1], 64)
-            projected_output = linear(output.transpose(1, 2)).transpose(1, 2)
-            all_features.append(projected_output)
-            pbar.update(1)
-        return torch.cat(all_features)
+    for text in (text_data):
+        tokens = tokenizer(text, padding='longest', return_tensors='pt')
+        output = text_embedding(tokens['input_ids'])
+        linear = torch.nn.Linear(output.shape[1], 64)
+        projected_output = linear(output.transpose(1, 2)).transpose(1, 2)
+        all_features.append(projected_output)
+    return torch.cat(all_features)
 
 def textExtractReverse(data):
-    ##### google/gemma-2b #####
-    # tokenizer = AutoTokenizer.from_pretrained("google/gemma-2b")
+    tokenizer = AutoTokenizer.from_pretrained("google/gemma-2-2b-it")
 
-    ###### twitter-roberta-base-emoji ######
-    tokenizer = AutoTokenizer.from_pretrained("cardiffnlp/twitter-roberta-base-emoji")
+    # 有時後空格會失效，所以手動插入空格 <pad> = 0
+    def insert_zeros(tensor):
+        zeros = torch.zeros(tensor.shape[0], tensor.shape[1] * 2 - 1)
+        zeros[:, ::2] = tensor
+        zeros = zeros.to(int)
+        return zeros
+
+    reverse_data = insert_zeros(data.squeeze(-1))
     # reverse the token
-    reverse = tokenizer.batch_decode(data.squeeze(-1), skip_special_tokens=True)
+    reverse = tokenizer.batch_decode(reverse_data, skip_special_tokens=False)
     # tokenize with gemma-2b
-    tokenizer_gemma = AutoTokenizer.from_pretrained("google/gemma-2b")
-    prompt = "Create a funny meme using the following text as the foundation for the joke. The meme should creatively incorporate humor that is relatable and witty, matching the tone of the provided content. Make sure to blend the text with an amusing visual representation that enhances the punchline: "
+    tokenizer_gemma = AutoTokenizer.from_pretrained("google/gemma-2-2b-it")
+    prompt = "Write a humor memetic post for Instagram with the following elements: "
     all_features = []
     for i, text in enumerate(reverse):
-        reverse[i] = prompt + text
-    tokens = tokenizer_gemma(reverse, padding='max_length', max_length=256, return_tensors='pt')
+        text = text.replace("<pad>", " ").replace("  ", " ")
+        text = text.split()
+        text = ', '.join(text)
+        reverse[i] = prompt + text + "."
+    tokens = tokenizer_gemma(reverse, padding='max_length', max_length=64, return_tensors='pt')
     all_features.append(tokens['input_ids'])
     return torch.cat(all_features)
 
@@ -69,21 +69,19 @@ def imageExtraction(image_data):
     swin.to(device)
 
     all_features = []
-    with tqdm(image_data) as pbar:
-        for image_path in (image_data):
-            with torch.no_grad():
-                # 加載並預處理圖像
-                image = Image.open(image_path)
-                # 使用 image_processor 將 batch 圖片處理成適合模型的格式
-                inputs = image_processor(image, return_tensors="pt")
-                # 將 inputs 放到 GPU 上（如果可用）
-                inputs.to(device)
-                # 獲取 Swinv2 模型的輸出
-                outputs = swin(**inputs)
-                last_hidden_states = outputs.last_hidden_state
-                # 儲存特徵
-                last_hidden_states = last_hidden_states.cpu()
-                all_features.append(last_hidden_states)
-                pbar.update(1)
+    for image_path in (image_data):
+        with torch.no_grad():
+            # 加載並預處理圖像
+            image = Image.open(image_path)
+            # 使用 image_processor 將 batch 圖片處理成適合模型的格式
+            inputs = image_processor(image, return_tensors="pt")
+            # 將 inputs 放到 GPU 上（如果可用）
+            inputs.to(device)
+            # 獲取 Swinv2 模型的輸出
+            outputs = swin(**inputs)
+            last_hidden_states = outputs.last_hidden_state
+            # 儲存特徵
+            last_hidden_states = last_hidden_states.cpu()
+            all_features.append(last_hidden_states)
     return torch.cat(all_features)
 
