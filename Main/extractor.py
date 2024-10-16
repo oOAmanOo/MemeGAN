@@ -17,14 +17,14 @@ def textExtraction(text_data):
 
     embedding_dim = 768  # 嵌入维度，與你的圖片嵌入维度相同
     text_embedding = nn.Embedding(vocab_size, embedding_dim)
+    avg_pool = nn.AdaptiveAvgPool1d(64)
 
     all_features = []
     for text in (text_data):
         tokens = tokenizer(text, padding='longest', return_tensors='pt')
         output = text_embedding(tokens['input_ids'])
-        linear = torch.nn.Linear(output.shape[1], 64)
-        projected_output = linear(output.transpose(1, 2)).transpose(1, 2)
-        all_features.append(projected_output)
+        output = avg_pool(output)
+        all_features.append(output)
     return torch.cat(all_features)
 
 def textExtractReverse(data):
