@@ -5,10 +5,12 @@ from transformers import AutoImageProcessor, Swinv2Model
 from PIL import Image
 import torch
 from transformers import AutoConfig
+import tqdm
 
 def addImagePath(data, imgPath):
     data['image_id'] = data['image_id'].apply(lambda x: imgPath + str(x) + '.jpg')
     return data
+
 
 def textExtraction(text_data):
     tokenizer = AutoTokenizer.from_pretrained("google/gemma-2-2b-it")
@@ -20,12 +22,18 @@ def textExtraction(text_data):
     avg_pool = nn.AdaptiveAvgPool1d(64)
 
     all_features = []
-    for text in (text_data):
-        tokens = tokenizer(text, padding='longest', return_tensors='pt')
-        output = text_embedding(tokens['input_ids'])
-        output = avg_pool(output)
-        all_features.append(output)
-    return torch.cat(all_features)
+    with tqdm.tqdm (total=len(text_data)) as pbar:
+        for text in (text_data):
+            tokens = tokenizer(text, padding='longest', return_tensors='pt', )
+            output = text_embedding(tokens['input_ids'])
+            if output.shape[1] > 64:
+                output = avg_pool(output)
+            elif output.shape[1] < 64:
+                padding = torch.zeros(output.shape[0], 64 - output.shape[1], 768)
+                output = torch.cat((output, padding), dim=1)
+            all_features.append(output.detach().numpy())
+            pbar.update(1)
+    return all_features
 
 def textExtractReverse(data):
     tokenizer = AutoTokenizer.from_pretrained("google/gemma-2-2b-it")
