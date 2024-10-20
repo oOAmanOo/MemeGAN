@@ -11,6 +11,7 @@ def addImagePath(data, imgPath):
     data['image_id'] = data['image_id'].apply(lambda x: imgPath + str(x) + '.jpg')
     return data
 
+
 def textExtraction(text_data):
     tokenizer = AutoTokenizer.from_pretrained("google/gemma-2-2b-it")
     gemmaConfig = AutoConfig.from_pretrained('google/gemma-2-2b-it')

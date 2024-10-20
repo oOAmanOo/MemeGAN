@@ -1,8 +1,3 @@
-/Main/Model/test_save/test_save_1NetD.pth
-/Main/Model/test_save/test_save_1NetD.pth
-/Main/Model/test_save/test_save_1NetG.pth
-/Main/Model/test_save/test_save_2NetD.pth
-/Main/Model/test_save/test_save_2NetG.pth
 /Citations/Oxford_HIC/data/Oxford_HIC-20240905T184435Z-001.zip
 /Data/Oxford_HIC/oxford_img/
 /Data/Oxford_HIC/Original_File/
@@ -22,3 +17,4 @@
 /Data/Oxford_HIC/Image1_oxford_hic_data.csv
 /Data/Oxford_HIC/Image_index_oxford_hic_data.csv
 /Data/Oxford_HIC/oxford_hic_data.csv
+
