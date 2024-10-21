@@ -25,7 +25,7 @@ def textExtraction(tokenizer, gemmaConfig, text_data):
     # with tqdm.tqdm (total=len(text_data)) as pbar:
     for text in (text_data):
         tokens = tokenizer(text, padding='longest', return_tensors='pt', )
-        output = text_embedding(tokens['input_ids'])
+        output = text_embedding(tokens['input_ids']).to(torch.bfloat16)
         if output.shape[1] > 64:
             output = avg_pool(output.transpose(1, 2)).transpose(1, 2)
         elif output.shape[1] < 64:
@@ -33,7 +33,7 @@ def textExtraction(tokenizer, gemmaConfig, text_data):
             output = torch.cat((output, padding), dim=1)
         all_features.append(output.detach())
         # pbar.update(1)
-    return torch.cat(all_features)
+    return torch.cat(all_features).to(torch.bfloat16)
 
 def textExtractReverse(data):
     tokenizer = AutoTokenizer.from_pretrained("google/gemma-2-2b-it")
@@ -57,7 +57,7 @@ def textExtractReverse(data):
         text = text.split()
         text = ', '.join(text)
         reverse[i] = prompt + text + "."
-    tokens = tokenizer_gemma(reverse, padding='max_length', max_length=64, return_tensors='pt')
+    tokens = tokenizer_gemma(reverse, truncation=True, padding='max_length', max_length=64, return_tensors='pt')
     # all_features.append(tokens['input_ids'])
     return tokens['input_ids']
 
