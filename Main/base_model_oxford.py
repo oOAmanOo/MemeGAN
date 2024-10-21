@@ -1,6 +1,7 @@
 import os
 import pandas as pd
 from tqdm import tqdm
+import matplotlib.pyplot as plt
 from sklearn.model_selection import train_test_split
 
 import torch
@@ -40,7 +41,11 @@ def train():
     # load data
     data = pd.read_csv(dirPath)
     print("shape of data: ", data.shape)
-    data.head()
+    data = data.sample(n=169988, random_state=42, replace=True).reset_index(drop=True)
+    # frac = 0.05 ==> 5% of the data = 169904
+    # n = 169920 ==> 72 * 2360 = 169920 (F2G)
+    # n = 169988 ==> 91 * 1868 = 169988 (G2F)
+    print("sample of data: ", data.shape)
 
     train, test = train_test_split(data, test_size=0.2, random_state=42)
     train_text = train['caption'].tolist()
@@ -52,8 +57,10 @@ def train():
 
     train_dataset = OxfordDataset(train_text, train_image, train_funny_score)
     test_dataset = OxfordDataset(test_text, test_image, test_funny_score)
-    train_loader = DataLoader(train_dataset, batch_size=64, shuffle=False, num_workers=20)
-    test_loader = DataLoader(test_dataset, batch_size=64, shuffle=False, num_workers=20)
+    train_loader = DataLoader(train_dataset, batch_size=91, shuffle=False, num_workers=20)
+    test_loader = DataLoader(test_dataset, batch_size=91, shuffle=False, num_workers=20)
+    # train_loader = DataLoader(train_dataset, batch_size=72, shuffle=False, num_workers=20)
+    # test_loader = DataLoader(test_dataset, batch_size=72, shuffle=False, num_workers=20)
 
     ### 官方的Gemma #########################################################################################
     tokenizer = AutoTokenizer.from_pretrained("google/gemma-2-2b-it")
@@ -434,34 +441,34 @@ def train():
                 GeneratorForwardTime += tepoch.format_dict['elapsed'] - pre
                 pre = tepoch.format_dict['elapsed']
 
-                # tepoch.set_postfix({'Now': tepoch.format_dict['elapsed'], 'Status': " Generator Backward - FunnyScore"})
-                loss_FC = funnyScoreLoss(output_funny_score.to(device), funny_score.to(device))
-                loss_FC.backward(retain_graph=True)
-                train_loss_FC += loss_FC.item()
-                GeneratorBackwardFCTime+= tepoch.format_dict['elapsed']-pre
-                pre = tepoch.format_dict['elapsed']
-                # tepoch.set_postfix({'Now': tepoch.format_dict['elapsed'], 'Status': " Generator Backward - Generator"})
-                loss_G = generatorLoss(g_con_logits.to(device), g_unc_logits.to(device))
-                loss_G.backward()
-                train_loss_G += loss_G.item()
-                optimizer_G.step()
-                GeneratorBackwardGTime+= tepoch.format_dict['elapsed']-pre
-                pre = tepoch.format_dict['elapsed']
-
-                # # tepoch.set_postfix({'Now': tepoch.format_dict['elapsed'], 'Status': " Generator Backward - Generator"})
-                # loss_G = generatorLoss(g_con_logits.to(device), g_unc_logits.to(device))
-                # loss_G.backward(retain_graph=True)
-                # train_loss_G += loss_G.item()
-                # GeneratorBackwardGTime += tepoch.format_dict['elapsed'] - pre
-                # pre = tepoch.format_dict['elapsed']
-                #
                 # # tepoch.set_postfix({'Now': tepoch.format_dict['elapsed'], 'Status': " Generator Backward - FunnyScore"})
                 # loss_FC = funnyScoreLoss(output_funny_score.to(device), funny_score.to(device))
-                # loss_FC.backward()
+                # loss_FC.backward(retain_graph=True)
                 # train_loss_FC += loss_FC.item()
-                # optimizer_G.step()
-                # GeneratorBackwardFCTime += tepoch.format_dict['elapsed'] - pre
+                # GeneratorBackwardFCTime+= tepoch.format_dict['elapsed']-pre
                 # pre = tepoch.format_dict['elapsed']
+                # # tepoch.set_postfix({'Now': tepoch.format_dict['elapsed'], 'Status': " Generator Backward - Generator"})
+                # loss_G = generatorLoss(g_con_logits.to(device), g_unc_logits.to(device))
+                # loss_G.backward()
+                # train_loss_G += loss_G.item()
+                # optimizer_G.step()
+                # GeneratorBackwardGTime+= tepoch.format_dict['elapsed']-pre
+                # pre = tepoch.format_dict['elapsed']
+
+                # tepoch.set_postfix({'Now': tepoch.format_dict['elapsed'], 'Status': " Generator Backward - Generator"})
+                loss_G = generatorLoss(g_con_logits.to(device), g_unc_logits.to(device))
+                loss_G.backward(retain_graph=True)
+                train_loss_G += loss_G.item()
+                GeneratorBackwardGTime += tepoch.format_dict['elapsed'] - pre
+                pre = tepoch.format_dict['elapsed']
+
+                # tepoch.set_postfix({'Now': tepoch.format_dict['elapsed'], 'Status': " Generator Backward - FunnyScore"})
+                loss_FC = funnyScoreLoss(output_funny_score.to(device), funny_score.to(device))
+                loss_FC.backward()
+                train_loss_FC += loss_FC.item()
+                optimizer_G.step()
+                GeneratorBackwardFCTime += tepoch.format_dict['elapsed'] - pre
+                pre = tepoch.format_dict['elapsed']
 
                 ######################################################
                 # (4) Update Discriminator network
@@ -604,9 +611,20 @@ def train():
         loss_data['test_D'] = test_losses_D
         loss_data['save'] = save
         loss_data.to_csv('./Model/' + save_name + "/" + save_name + '_loss.csv', index=False)
+
+        plt.plot(train_losses_FC, label='train')
+        plt.plot(train_losses_G, label='train')
+        plt.plot(train_losses_D, label='train')
+        plt.plot(test_losses_FC, label='test')
+        plt.plot(test_losses_G, label='test')
+        plt.plot(test_losses_D, label='test')
+        plt.legend()
+        plt.show()
+        # save plot
+        plt.savefig('./Model/' + save_name + "/" + save_name + '_loss.png')
         ######################################  Save ######################################
-    # 0%|          | 4/84954 [01:24<513:13:51, 21.75s/batch, FC_loss=1.33, G_loss=1.71, D_loss=37.2]
-    # 0%|          | 118/84954 [40:27<488:29:01, 20.73s/batch, FC_loss=0.0704, G_loss=1.73, D_loss=2.83]
+
+
 
 
 if __name__ == '__main__':
