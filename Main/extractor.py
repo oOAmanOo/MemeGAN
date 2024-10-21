@@ -12,9 +12,9 @@ def addImagePath(data, imgPath):
     return data
 
 
-def textExtraction(text_data):
-    tokenizer = AutoTokenizer.from_pretrained("google/gemma-2-2b-it")
-    gemmaConfig = AutoConfig.from_pretrained('google/gemma-2-2b-it')
+def textExtraction(tokenizer, gemmaConfig, text_data):
+    # tokenizer = AutoTokenizer.from_pretrained("google/gemma-2-2b-it")
+    # gemmaConfig = AutoConfig.from_pretrained('google/gemma-2-2b-it')
     vocab_size = gemmaConfig.vocab_size  # 詞彙表大小
 
     embedding_dim = 768  # 嵌入维度，與你的圖片嵌入维度相同
@@ -27,7 +27,7 @@ def textExtraction(text_data):
         tokens = tokenizer(text, padding='longest', return_tensors='pt', )
         output = text_embedding(tokens['input_ids'])
         if output.shape[1] > 64:
-            output = avg_pool(output)
+            output = avg_pool(output.transpose(1, 2)).transpose(1, 2)
         elif output.shape[1] < 64:
             padding = torch.zeros(output.shape[0], 64 - output.shape[1], 768)
             output = torch.cat((output, padding), dim=1)
