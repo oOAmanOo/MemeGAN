@@ -505,19 +505,16 @@ def train():
 
         ######################################  Test ######################################
         with tqdm(test_loader, unit="batch", leave=True) as tepoch:
-            tepoch.set_postfix({'Now': " New batch preprocessing"})
             for idx, (text, image, funny_score) in enumerate(tepoch):
                 text = textExtraction(tokenizer, gemmaConfig, text)
+                image = image.to(torch.bfloat16)
+                funny_score = funny_score.to(torch.bfloat16)
                 # Generator
-                tepoch.set_postfix({'Now': " Generator"})
                 logits, output_funny_score = NetG(text.to(device), image.to(device))
                 # Discriminator
-                tepoch.set_postfix({'Now': " Discriminator - Generator"})
                 g_con_logits, g_unc_logits = NetD(text.to(device), logits, image.to(device), "G")
-                tepoch.set_postfix({'Now': " Discriminator - Discriminator"})
-                d_con_logits, d_unc_logits = NetD(text.to(device), logits.clone().detach(), image.to(device), "D")
+                d_con_logits, d_unc_logits = NetD(text.to(device).detach(), logits.detach(), image.to(device).detach(),"D")
                 # loss
-                tepoch.set_postfix({'Now': " Computing loss"})
                 loss_FC = funnyScoreLoss(output_funny_score, funny_score.to(device))
                 loss_G = generatorLoss(g_con_logits, g_unc_logits)
                 loss_D = discriminatorLoss(d_con_logits, d_unc_logits)
