@@ -26,22 +26,26 @@ class OxfordDataset(torch.utils.data.Dataset):
     def __getitem__(self, idx):
         imageData = torch.load('../Data/Oxford_HIC/ImageData/'+ self.image[idx] +'.pt', weights_only=False)
         # all dtype to torch.float16
-        imageData = imageData.to(torch.float16)
+        imageData = imageData
 
         return self.text[idx], imageData, self.funny_score[idx]
 
 
 def train():
+    save_name = 'time'
+    if not os.path.exists('./Model/' + save_name):
+        os.makedirs('./Model/' + save_name)
+
+
     # if args.img - dir == 'Oxford_HIC':
     dirPath = '../Data/Oxford_HIC/Filtered_oxford_hic_data.csv'
-    imgPath = '../Data/Oxford_HIC/oxford_img/'
     # else:
     # dirPath = '../Data/Instagram/Filter_' + 'wendys' + '.csv'
     # imgPath = '../Data/Instagram/' + 'wendys' + '_img/'
     # load data
     data = pd.read_csv(dirPath)
     print("shape of data: ", data.shape)
-    data = data.sample(n=169988, random_state=42, replace=True).reset_index(drop=True)
+    # data = data.sample(n=169988, random_state=42, replace=True).reset_index(drop=True)
     # frac = 0.05 ==> 5% of the data = 169904
     # n = 169920 ==> 72 * 2360 = 169920 (F2G)
     # n = 169988 ==> 91 * 1868 = 169988 (G2F)
@@ -57,8 +61,10 @@ def train():
 
     train_dataset = OxfordDataset(train_text, train_image, train_funny_score)
     test_dataset = OxfordDataset(test_text, test_image, test_funny_score)
-    train_loader = DataLoader(train_dataset, batch_size=91, shuffle=False, num_workers=20)
-    test_loader = DataLoader(test_dataset, batch_size=91, shuffle=False, num_workers=20)
+    train_loader = DataLoader(train_dataset, batch_size=32, shuffle=True, num_workers=20, pin_memory=False)
+    test_loader = DataLoader(test_dataset, batch_size=32, shuffle=True, num_workers=20, pin_memory=False)
+    # train_loader = DataLoader(train_dataset, batch_size=90, shuffle=False, num_workers=20)
+    # test_loader = DataLoader(test_dataset, batch_size=90, shuffle=False, num_workers=20)
     # train_loader = DataLoader(train_dataset, batch_size=72, shuffle=False, num_workers=20)
     # test_loader = DataLoader(test_dataset, batch_size=72, shuffle=False, num_workers=20)
 
@@ -136,7 +142,12 @@ def train():
             self.gemmaLinearBefore = nn.Linear(768, gemmaConfig.vocab_size)
             self.gemmaSoftmax = nn.Softmax(dim=2)
             self.gemma = nn.Sequential(*list(gemma.children())[:-1])
-            self.gemmaLm_head = nn.Sequential(*list(gemma.children())[1:])
+            # self.gemmaLm_head = nn.Sequential(*list(gemma.children())[1:])
+            self.gemmaLm_head = nn.Linear(2304,gemmaConfig.vocab_size)
+            # self.gemmaLm_head = nn.Sequential(
+            #     nn.Linear(2304, 64000, bias=False),
+            #     nn.Linear(64000, gemmaConfig.vocab_size, bias=False),
+            # )
 
             # funny score
             self.FunnyScorelinear1 = nn.Linear(768, 1)
@@ -183,7 +194,7 @@ def train():
             last_hidden_state = self.gemmaGenerate(feature_fusion)
             output_text = self.gemmaLm_head(last_hidden_state)
             ###############################################################
-
+            output_text = output_text.to(torch.bfloat16)
             ######################### funny score #########################
             output_funny_score = self.FunnyScorelinear1(feature_fusion).squeeze(-1)
             output_funny_score = self.FunnyScorelinear2(output_funny_score).squeeze(-1)
@@ -282,9 +293,7 @@ def train():
             # real_text = [batch_size, 64, 768]
             # fake_text = [batch_size, 256, 256000]
             # image = [batch_size, 64, 768]
-
             if GorD == "G":
-                g_fake_text = self.g_linearFake(fake_text)
                 g_fake_text = self.g_linearFake(fake_text)
                 g_C_g = torch.cat((g_fake_text, image), dim=1)
                 ########################  conditional  ########################
@@ -340,21 +349,28 @@ def train():
     optimizer_G = optim.Adam(NetG.parameters(), lr=0.001)
     optimizer_D = optim.Adam(NetD.parameters(), lr=0.001)
 
-    train_losses_FC = []
     train_losses_G = []
     train_losses_D = []
-    test_losses_FC = []
     test_losses_G = []
     test_losses_D = []
     save = []
     present_epoch = 1
-    best_train_loss_FC = 9999
     best_train_loss_G = 9999
     best_train_loss_D = 9999
-    best_test_loss_FC = 9999
     best_test_loss_G = 9999
     best_test_loss_D = 9999
     loss_data = pd.DataFrame()
+
+    g_fc_loss_list = []
+    g_con_loss_list = []
+    g_unc_loss_list = []
+    d_con_r2f_loss_list = []
+    d_con_f2r_loss_list = []
+    d_con_f_loss_list = []
+    d_con_m_loss_list = []
+    d_unc_r_loss_list = []
+    d_unc_f_loss_list = []
+    d_unc_m_loss_list = []
 
     checkpoint = False
     if checkpoint:
@@ -364,44 +380,53 @@ def train():
         NetD.load_state_dict(checkpoint_D['model_state_dict'])
         optimizer_G.load_state_dict(checkpoint_G['optimizer_state_dict'])
         optimizer_D.load_state_dict(checkpoint_D['optimizer_state_dict'])
-        train_losses_FC.append(checkpoint_G['FC_loss'])
         train_losses_G.append(checkpoint_G['G_loss'])
         train_losses_D.append(checkpoint_G['D_loss'])
         present_epoch = checkpoint_G['epoch'] + 1
 
     def funnyScoreLoss(output_funny_score, funny_score):
-        return nn.MSELoss()(output_funny_score, funny_score + eps)
+        loss = nn.MSELoss()(output_funny_score, funny_score)
+        g_fc_loss_list.append(loss.item())
+        return loss
 
     def generatorLoss(condition_logits, uncondition_logits):
-        result_fake = (torch.zeros(uncondition_logits.shape[0])).to(device)
-        con_loss = CrossEntropyLoss()(condition_logits, result_fake.to(torch.long))
-        unc_loss = BCEWithLogitsLoss()(uncondition_logits, result_fake)
+        result_fake_con = torch.zeros(condition_logits.shape[0]).to(torch.long).to(device)
+        result_fake_unc = torch.FloatTensor(condition_logits.shape[0]).to(torch.bfloat16).uniform_(0.0, 0.1).to(device)
+        con_loss = CrossEntropyLoss(label_smoothing=0.1)(condition_logits, result_fake_con)
+        unc_loss = BCEWithLogitsLoss()(uncondition_logits, result_fake_unc)
+        g_con_loss_list.append(con_loss.item())
+        g_unc_loss_list.append(unc_loss.item())
         loss = con_loss + unc_loss
         return loss
 
     def discriminatorLoss(condition_logits, uncondition_logits):
-        result_true = (torch.ones(uncondition_logits[0].shape[0])).to(device)
-        result_fake = (torch.zeros(uncondition_logits[0].shape[0])).to(device)
+        result_true = torch.FloatTensor(uncondition_logits[0].shape[0]).to(torch.bfloat16).uniform_(0.9, 1.0).to(device)
+        result_fake_ce = torch.zeros(uncondition_logits[0].shape[0]).to(torch.long).to(device)
+        result_fake_unc_f = torch.FloatTensor(uncondition_logits[1].shape[0]).to(torch.bfloat16).uniform_(0.0, 0.1).to(device)
+        result_fake_unc_m = torch.FloatTensor(uncondition_logits[2].shape[0]).to(torch.bfloat16).uniform_(0.0, 0.1).to(device)
 
-        con_r2f = CrossEntropyLoss()(condition_logits[0], result_fake.to(torch.long))
-        con_f2r = CrossEntropyLoss()(condition_logits[1], result_fake.to(torch.long))
-        con_f = CrossEntropyLoss()(condition_logits[2], result_fake.to(torch.long))
-        con_m = CrossEntropyLoss()(condition_logits[3], result_fake.to(torch.long))
+        con_r2f = CrossEntropyLoss(label_smoothing=0.1)(condition_logits[0], result_fake_ce)
+        con_f2r = CrossEntropyLoss(label_smoothing=0.1)(condition_logits[1], result_fake_ce)
+        con_f = CrossEntropyLoss(label_smoothing=0.1)(condition_logits[2], result_fake_ce)
+        con_m = CrossEntropyLoss(label_smoothing=0.1)(condition_logits[3], result_fake_ce)
         unc_r = BCEWithLogitsLoss()(uncondition_logits[0], result_true)
-        unc_f = BCEWithLogitsLoss()(uncondition_logits[1], result_fake)
-        unc_m = BCEWithLogitsLoss()(uncondition_logits[2], result_fake)
+        unc_f = BCEWithLogitsLoss()(uncondition_logits[1], result_fake_unc_f)
+        unc_m = BCEWithLogitsLoss()(uncondition_logits[2], result_fake_unc_m)
+        d_con_r2f_loss_list.append(con_r2f.item())
+        d_con_f2r_loss_list.append(con_f2r.item())
+        d_con_f_loss_list.append(con_f.item())
+        d_con_m_loss_list.append(con_m.item())
+        d_unc_r_loss_list.append(unc_r.item())
+        d_unc_f_loss_list.append(unc_f.item())
+        d_unc_m_loss_list.append(unc_m.item())
         loss = ((con_r2f + con_f2r) / 2) + ((con_f + con_m) / 2) + unc_r + ((unc_f + unc_m) / 2)
         return loss
 
-    save_name = '20241021'
-    if not os.path.exists('./Model/' + save_name):
-        os.makedirs('./Model/' + save_name)
 
     epochs = 30
     startTime = 0
     textExtractionTime = 0
     GeneratorForwardTime = 0
-    GeneratorBackwardFCTime = 0
     GeneratorBackwardGTime = 0
     DiscriminatorForwardTime = 0
     DiscriminatorBackwardTime = 0
@@ -409,10 +434,8 @@ def train():
     for epoch in range(epochs):
         print("---------------------------------------- epoch " + str(
             epoch + present_epoch) + " ---------------------------------------\n")
-        train_loss_FC = 0
         train_loss_G = 0
         train_loss_D = 0
-        test_loss_FC = 0
         test_loss_G = 0
         test_loss_D = 0
         pre = 0
@@ -422,7 +445,7 @@ def train():
                 # tepoch.set_postfix({'Now': tepoch.format_dict['elapsed'], 'Status': " New batch preprocessing"})
                 startTime += tepoch.format_dict['elapsed'] - pre
                 pre = tepoch.format_dict['elapsed']
-                text = textExtraction(tokenizer, gemmaConfig, text)
+                text = textExtraction(tokenizer, gemmaConfig, text).to(torch.bfloat16)
                 image = image.to(torch.bfloat16)
                 funny_score = funny_score.to(torch.bfloat16)
                 # print(text.dtype, image.dtype, funny_score.dtype)
@@ -441,35 +464,13 @@ def train():
                 GeneratorForwardTime += tepoch.format_dict['elapsed'] - pre
                 pre = tepoch.format_dict['elapsed']
 
-                # # tepoch.set_postfix({'Now': tepoch.format_dict['elapsed'], 'Status': " Generator Backward - FunnyScore"})
-                # loss_FC = funnyScoreLoss(output_funny_score.to(device), funny_score.to(device))
-                # loss_FC.backward(retain_graph=True)
-                # train_loss_FC += loss_FC.item()
-                # GeneratorBackwardFCTime+= tepoch.format_dict['elapsed']-pre
-                # pre = tepoch.format_dict['elapsed']
-                # # tepoch.set_postfix({'Now': tepoch.format_dict['elapsed'], 'Status': " Generator Backward - Generator"})
-                # loss_G = generatorLoss(g_con_logits.to(device), g_unc_logits.to(device))
-                # loss_G.backward()
-                # train_loss_G += loss_G.item()
-                # optimizer_G.step()
-                # GeneratorBackwardGTime+= tepoch.format_dict['elapsed']-pre
-                # pre = tepoch.format_dict['elapsed']
-
                 # tepoch.set_postfix({'Now': tepoch.format_dict['elapsed'], 'Status': " Generator Backward - Generator"})
-                loss_G = generatorLoss(g_con_logits.to(device), g_unc_logits.to(device))
+                loss_G = (1e-06 * generatorLoss(g_con_logits.to(device), g_unc_logits.to(device))) + funnyScoreLoss(output_funny_score.to(device), funny_score.to(device))
                 loss_G.backward(retain_graph=True)
                 train_loss_G += loss_G.item()
+                optimizer_G.step()
                 GeneratorBackwardGTime += tepoch.format_dict['elapsed'] - pre
                 pre = tepoch.format_dict['elapsed']
-
-                # tepoch.set_postfix({'Now': tepoch.format_dict['elapsed'], 'Status': " Generator Backward - FunnyScore"})
-                loss_FC = funnyScoreLoss(output_funny_score.to(device), funny_score.to(device))
-                loss_FC.backward()
-                train_loss_FC += loss_FC.item()
-                optimizer_G.step()
-                GeneratorBackwardFCTime += tepoch.format_dict['elapsed'] - pre
-                pre = tepoch.format_dict['elapsed']
-
                 ######################################################
                 # (4) Update Discriminator network
                 ######################################################
@@ -490,15 +491,24 @@ def train():
                 # tepoch.set_postfix({'FC_loss': train_loss_FC/ (idx+1), 'G_loss': train_loss_G/ (idx+1), 'D_loss': train_loss_D/ (idx+1)})
                 tepoch.set_postfix({'start': startTime / (idx + 1), 'textExtraction': textExtractionTime / (idx + 1),
                                     'GeneratorForward': GeneratorForwardTime / (idx + 1),
-                                    'GeneratorBackwardFC': GeneratorBackwardFCTime / (idx + 1),
                                     'GeneratorBackwardG': GeneratorBackwardGTime / (idx + 1),
                                     'DiscriminatorForward': DiscriminatorForwardTime / (idx + 1),
                                     'DiscriminatorBackward': DiscriminatorBackwardTime / (idx + 1)})
+                sepateLoss = pd.DataFrame()
+                sepateLoss['g_fc_loss'] = g_fc_loss_list
+                sepateLoss['g_con_loss'] = g_con_loss_list
+                sepateLoss['g_unc_loss'] = g_unc_loss_list
+                sepateLoss['d_con_r2f_loss'] = d_con_r2f_loss_list
+                sepateLoss['d_con_f2r_loss'] = d_con_f2r_loss_list
+                sepateLoss['d_con_f_loss'] = d_con_f_loss_list
+                sepateLoss['d_con_m_loss'] = d_con_m_loss_list
+                sepateLoss['d_unc_r_loss'] = d_unc_r_loss_list
+                sepateLoss['d_unc_f_loss'] = d_unc_f_loss_list
+                sepateLoss['d_unc_m_loss'] = d_unc_m_loss_list
+                sepateLoss.to_csv('./Model/' + save_name + "/" + save_name + '_sepateLoss.csv', index=False)
                 ######################################################
-        train_loss_FC /= len(train_loader)
         train_loss_G /= len(train_loader)
         train_loss_D /= len(train_loader)
-        train_losses_FC.append(train_loss_FC)
         train_losses_G.append(train_loss_G)
         train_losses_D.append(train_loss_D)
         ###################################### Train ######################################
@@ -506,7 +516,7 @@ def train():
         ######################################  Test ######################################
         with tqdm(test_loader, unit="batch", leave=True) as tepoch:
             for idx, (text, image, funny_score) in enumerate(tepoch):
-                text = textExtraction(tokenizer, gemmaConfig, text)
+                text = textExtraction(tokenizer, gemmaConfig, text).to(torch.bfloat16)
                 image = image.to(torch.bfloat16)
                 funny_score = funny_score.to(torch.bfloat16)
                 # Generator
@@ -515,18 +525,14 @@ def train():
                 g_con_logits, g_unc_logits = NetD(text.to(device), logits, image.to(device), "G")
                 d_con_logits, d_unc_logits = NetD(text.to(device).detach(), logits.detach(), image.to(device).detach(),"D")
                 # loss
-                loss_FC = funnyScoreLoss(output_funny_score, funny_score.to(device))
-                loss_G = generatorLoss(g_con_logits, g_unc_logits)
+                loss_G = generatorLoss(g_con_logits, g_unc_logits) + funnyScoreLoss(output_funny_score, funny_score.to(device))
                 loss_D = discriminatorLoss(d_con_logits, d_unc_logits)
-                test_loss_FC += loss_FC.item()
                 test_loss_G += loss_G.item()
                 test_loss_D += loss_D.item()
-                tepoch.set_postfix({'FC_loss': test_loss_FC / (idx + 1), 'G_loss': test_loss_G / (idx + 1),
+                tepoch.set_postfix({'G_loss': test_loss_G / (idx + 1),
                                     'D_loss': test_loss_D / (idx + 1)})
-        test_loss_FC /= len(test_loader)
         test_loss_G /= len(test_loader)
         test_loss_D /= len(test_loader)
-        test_losses_FC.append(test_loss_FC)
         test_losses_G.append(test_loss_G)
         test_losses_D.append(test_loss_D)
         ######################################  Test ######################################
@@ -534,26 +540,6 @@ def train():
         ######################################  Save ######################################
         hasSaved = False
         # 任一個loss小於最佳loss就存檔
-        if train_loss_FC < best_train_loss_FC and test_loss_FC < best_test_loss_FC:
-            best_train_loss_FC = train_loss_FC
-            best_test_loss_FC = test_loss_FC
-            hasSaved = True
-            torch.save({
-                'epoch': epoch + present_epoch,
-                'model_state_dict': NetG.state_dict(),
-                'optimizer_state_dict': optimizer_G.state_dict(),
-                'FC_loss': loss_FC,
-                'G_loss': loss_G,
-                'D_loss': loss_D,
-            }, './Model/' + save_name + "/" + save_name + '_NetG_' + str(epoch + present_epoch) + '.pth')
-            torch.save({
-                'epoch': epoch + present_epoch,
-                'model_state_dict': NetD.state_dict(),
-                'optimizer_state_dict': optimizer_D.state_dict(),
-                'FC_loss': loss_FC,
-                'G_loss': loss_G,
-                'D_loss': loss_D,
-            }, './Model/' + save_name + "/" + save_name + '_NetD_' + str(epoch + present_epoch) + '.pth')
         if train_loss_G < best_train_loss_G and test_loss_G < best_test_loss_G:
             best_train_loss_G = train_loss_G
             best_test_loss_G = test_loss_G
@@ -562,7 +548,6 @@ def train():
                 'epoch': epoch + present_epoch,
                 'model_state_dict': NetG.state_dict(),
                 'optimizer_state_dict': optimizer_G.state_dict(),
-                'FC_loss': loss_FC,
                 'G_loss': loss_G,
                 'D_loss': loss_D,
             }, './Model/' + save_name + "/" + save_name + '_NetG_' + str(epoch + present_epoch) + '.pth')
@@ -570,7 +555,6 @@ def train():
                 'epoch': epoch + present_epoch,
                 'model_state_dict': NetD.state_dict(),
                 'optimizer_state_dict': optimizer_D.state_dict(),
-                'FC_loss': loss_FC,
                 'G_loss': loss_G,
                 'D_loss': loss_D,
             }, './Model/' + save_name + "/" + save_name + '_NetD_' + str(epoch + present_epoch) + '.pth')
@@ -582,7 +566,6 @@ def train():
                 'epoch': epoch + present_epoch,
                 'model_state_dict': NetG.state_dict(),
                 'optimizer_state_dict': optimizer_G.state_dict(),
-                'FC_loss': loss_FC,
                 'G_loss': loss_G,
                 'D_loss': loss_D,
             }, './Model/' + save_name + "/" + save_name + '_NetG_' + str(epoch + present_epoch) + '.pth')
@@ -590,7 +573,6 @@ def train():
                 'epoch': epoch + present_epoch,
                 'model_state_dict': NetD.state_dict(),
                 'optimizer_state_dict': optimizer_D.state_dict(),
-                'FC_loss': loss_FC,
                 'G_loss': loss_G,
                 'D_loss': loss_D,
             }, './Model/' + save_name + "/" + save_name + '_NetD_' + str(epoch + present_epoch) + '.pth')
@@ -600,19 +582,15 @@ def train():
         else:
             save.append(" ")
 
-        loss_data['train_FC'] = train_losses_FC
         loss_data['train_G'] = train_losses_G
         loss_data['train_D'] = train_losses_D
-        loss_data['test_FC'] = test_losses_FC
         loss_data['test_G'] = test_losses_G
         loss_data['test_D'] = test_losses_D
         loss_data['save'] = save
         loss_data.to_csv('./Model/' + save_name + "/" + save_name + '_loss.csv', index=False)
 
-        plt.plot(train_losses_FC, label='train')
         plt.plot(train_losses_G, label='train')
         plt.plot(train_losses_D, label='train')
-        plt.plot(test_losses_FC, label='test')
         plt.plot(test_losses_G, label='test')
         plt.plot(test_losses_D, label='test')
         plt.legend()
@@ -620,9 +598,6 @@ def train():
         # save plot
         plt.savefig('./Model/' + save_name + "/" + save_name + '_loss.png')
         ######################################  Save ######################################
-
-
-
 
 if __name__ == '__main__':
     train()
