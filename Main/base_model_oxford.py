@@ -376,7 +376,6 @@ def train():
     best_train_loss_D = 9999
     best_test_loss_G = 9999
     best_test_loss_D = 9999
-    loss_data = pd.DataFrame()
 
     checkpoint = False
     if checkpoint:
@@ -571,6 +570,7 @@ def train():
         else:
             save.append(" ")
 
+        loss_data = pd.DataFrame()
         loss_data['train_G'] = train_losses_G
         loss_data['train_D'] = train_losses_D
         loss_data['test_G'] = test_losses_G
@@ -578,10 +578,10 @@ def train():
         loss_data['save'] = save
         loss_data.to_csv('./Model/' + save_name + "/" + save_name + '_loss.csv', index=False)
 
-        plt.plot(train_losses_G, label='train')
-        plt.plot(train_losses_D, label='train')
-        plt.plot(test_losses_G, label='test')
-        plt.plot(test_losses_D, label='test')
+        plt.plot(train_losses_G, label='train_G')
+        plt.plot(train_losses_D, label='train_D')
+        plt.plot(test_losses_G, label='test_G')
+        plt.plot(test_losses_D, label='test_D')
         plt.legend()
         plt.show()
         # save plot
