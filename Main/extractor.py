@@ -91,7 +91,7 @@ def imageExtraction(image_data):
                 last_hidden_states = outputs.last_hidden_state
                 # 儲存特徵
                 last_hidden_states = last_hidden_states.cpu()
-                all_features.append(last_hidden_states.squeeze(0).detach().numpy().tolist())
+                all_features.append(last_hidden_states.squeeze(0).detach())
                 pbar.update(1)
     return all_features
 

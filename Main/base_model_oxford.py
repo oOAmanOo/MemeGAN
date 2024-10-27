@@ -10,7 +10,7 @@ import torch.optim as optim
 from torch.nn import BCEWithLogitsLoss, CrossEntropyLoss, BCELoss
 from torch.utils.data import DataLoader
 from transformers import AutoConfig, AutoTokenizer, AutoModelForCausalLM, BitsAndBytesConfig
-from local_gemma import LocalGemma2ForCausalLM
+# from local_gemma import LocalGemma2ForCausalLM
 
 from extractor import addImagePath, textExtraction, imageExtraction, textExtractReverse
 eps = torch.finfo(torch.bfloat16).eps
@@ -33,7 +33,11 @@ class OxfordDataset(torch.utils.data.Dataset):
 
 
 def train():
-    save_name = 'time'
+    batch_size = 32
+    optimizer_G_lr = 1e-5
+    optimizer_D_lr = 1e-5
+    save_name = '20241028_lr_1e-5'
+    # save_name = '20241028'
     if not os.path.exists('./Model/' + save_name):
         os.makedirs('./Model/' + save_name)
 
@@ -64,12 +68,8 @@ def train():
     test_dataset = OxfordDataset(test_text, test_image, test_funny_score)
     # train_loader = DataLoader(train_dataset, batch_size=128, shuffle=True, num_workers=20)
     # test_loader = DataLoader(test_dataset, batch_size=128, shuffle=True, num_workers=20)
-    train_loader = DataLoader(train_dataset, batch_size=64, shuffle=True, num_workers=20, pin_memory=True)
-    test_loader = DataLoader(test_dataset, batch_size=64, shuffle=True, num_workers=20, pin_memory=True)
-    # train_loader = DataLoader(train_dataset, batch_size=90, shuffle=False, num_workers=20)
-    # test_loader = DataLoader(test_dataset, batch_size=90, shuffle=False, num_workers=20)
-    # train_loader = DataLoader(train_dataset, batch_size=72, shuffle=False, num_workers=20)
-    # test_loader = DataLoader(test_dataset, batch_size=72, shuffle=False, num_workers=20)
+    train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True, num_workers=20, pin_memory=True)
+    test_loader = DataLoader(test_dataset, batch_size=batch_size, shuffle=True, num_workers=20, pin_memory=True)
 
     ### 官方的Gemma #########################################################################################
     tokenizer = AutoTokenizer.from_pretrained("google/gemma-2-2b-it")
@@ -330,8 +330,10 @@ def train():
                 C_g = torch.cat((d_fake_text, image), dim=1)
                 C_m = torch.cat((mismatched_text, image), dim=1)
                 # contrastive discriminator
-                d_C_r2f = torch.cat((C_r, C_g), dim=1)
-                d_C_f2r = torch.cat((C_g, C_r), dim=1)
+                cd_C_r = C_r.unsqueeze(0).expand(C_r.shape[0], -1, -1, -1)
+                cd_C_g = C_g.unsqueeze(0).expand(C_g.shape[0], -1, -1, -1)
+                d_C_r2f = torch.cat((cd_C_r.transpose(0, 1), cd_C_g), dim=2)
+                d_C_f2r = torch.cat((cd_C_g.transpose(0, 1), cd_C_r), dim=2)
 
                 ######################## conditional ########################
                 d_C_r2f = self.d_con_mlp1_r2f(d_C_r2f)
@@ -339,10 +341,13 @@ def train():
                 d_C_g = self.d_con_mlp1_g(C_g)
                 d_C_m = self.d_con_mlp1_m(C_m)
 
-                d_C_r2f = self.d_con_mlp2_r2f(d_C_r2f.transpose(1, 2)).squeeze(-1).unsqueeze(0)
-                d_C_f2r = self.d_con_mlp2_r2f(d_C_f2r.transpose(1, 2)).squeeze(-1).unsqueeze(0)
-                d_C_g = self.d_con_mlp2_g(d_C_g.transpose(1, 2)).squeeze(-1).unsqueeze(0)
-                d_C_m = self.d_con_mlp2_m(d_C_m.transpose(1, 2)).squeeze(-1).unsqueeze(0)
+                d_C_r2f = self.d_con_mlp2_r2f(d_C_r2f.transpose(2,3)).squeeze(-1)
+                d_C_f2r = self.d_con_mlp2_r2f(d_C_f2r.transpose(2,3)).squeeze(-1)
+                d_C_g = self.d_con_mlp2_g(d_C_g.transpose(1,2)).squeeze(-1).unsqueeze(0)
+                d_C_m = self.d_con_mlp2_m(d_C_m.transpose(1,2)).squeeze(-1).unsqueeze(0)
+
+                d_C_r2f = self.d_con_mlp3_r2f(d_C_r2f.transpose(1,2)).squeeze(-1).unsqueeze(0)
+                d_C_f2r = self.d_con_mlp3_f2r(d_C_f2r.transpose(1,2)).squeeze(-1).unsqueeze(0)
 
                 d_con_output = torch.cat((d_C_r2f, d_C_f2r, d_C_g, d_C_m), dim=0)
                 ###############################################################
@@ -363,8 +368,8 @@ def train():
 
     NetG = Generator().to(torch.bfloat16).to(device)
     NetD = Discriminator().to(torch.bfloat16).to(device)
-    optimizer_G = optim.Adam(NetG.parameters(), lr=0.001)
-    optimizer_D = optim.Adam(NetD.parameters(), lr=0.001)
+    optimizer_G = optim.Adam(NetG.parameters(), lr=optimizer_G_lr)
+    optimizer_D = optim.Adam(NetD.parameters(), lr=optimizer_D_lr)
 
     train_losses_G = []
     train_losses_D = []
@@ -457,7 +462,6 @@ def train():
                 # (1) Update Generator network
                 ######################################################
                 optimizer_G.zero_grad()
-                # logits_detach = logits.clone().detach()
                 # tepoch.set_postfix({'Now': tepoch.format_dict['elapsed'], 'Status': " Generator Forward"})
                 logits, output_funny_score = NetG(text.to(device), image.to(device))
                 g_con_logits, g_unc_logits = NetD(text.to(device), logits, image.to(device), "G")
