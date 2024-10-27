@@ -25,7 +25,7 @@ class OxfordDataset(torch.utils.data.Dataset):
         return len(self.text)
 
     def __getitem__(self, idx):
-        imageData = torch.load('../Data/Oxford_HIC/ImageData/'+ self.image[idx] +'.pt', weights_only=False)
+        imageData = torch.load('../../Oxford_HIC/ImageData/'+ self.image[idx] +'.pt', weights_only=False)
         # all dtype to torch.float16
         imageData = imageData
 
@@ -33,7 +33,8 @@ class OxfordDataset(torch.utils.data.Dataset):
 
 
 def train():
-    batch_size = 32
+    epochs = 30
+    batch_size = 64
     optimizer_G_lr = 1e-5
     optimizer_D_lr = 1e-5
     save_name = '20241028_lr_1e-5'
@@ -293,8 +294,10 @@ def train():
             self.d_linearFake = nn.Linear(gemmaConfig.vocab_size, 768)
             self.d_con_mlp1_r2f = nn.Linear(768, 2)
             self.d_con_mlp2_r2f = nn.Linear(256, 1)
+            self.d_con_mlp3_r2f = nn.Linear(batch_size, 1)
             self.d_con_mlp1_f2r = nn.Linear(768, 2)
             self.d_con_mlp2_f2r = nn.Linear(256, 1)
+            self.d_con_mlp3_f2r = nn.Linear(batch_size, 1)
             self.d_con_mlp1_g = nn.Linear(768, 2)
             self.d_con_mlp2_g = nn.Linear(128, 1)
             self.d_con_mlp1_m = nn.Linear(768, 2)
@@ -423,7 +426,7 @@ def train():
         return loss
 
 
-    epochs = 30
+
     startTime = 0
     textExtractionTime = 0
     GeneratorForwardTime = 0
