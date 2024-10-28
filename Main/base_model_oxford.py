@@ -34,24 +34,24 @@ class OxfordDataset(torch.utils.data.Dataset):
 
 def train():
     epochs = 30
-    batch_size = 64
+    batch_size = 128
     optimizer_G_lr = 1e-5
     optimizer_D_lr = 1e-5
-    save_name = '20241028_lr_1e-5'
+    save_name = 'test_gemma'
     # save_name = '20241028'
     if not os.path.exists('./Model/' + save_name):
         os.makedirs('./Model/' + save_name)
 
 
     # if args.img - dir == 'Oxford_HIC':
-    dirPath = '../Data/Oxford_HIC/Filtered_oxford_hic_data.csv'
+    dirPath = '../Data/Oxford_HIC/CaptionID_oxford_hic_data.csv'
     # else:
     # dirPath = '../Data/Instagram/Filter_' + 'wendys' + '.csv'
     # imgPath = '../Data/Instagram/' + 'wendys' + '_img/'
     # load data
     data = pd.read_csv(dirPath)
     print("shape of data: ", data.shape)
-    data = data.sample(n=50000, random_state=42, replace=True).reset_index(drop=True)
+    # data = data.sample(n=50000, random_state=42, replace=True).reset_index(drop=True)
     # frac = 0.05 ==> 5% of the data = 169904
     # n = 169920 ==> 72 * 2360 = 169920 (F2G)
     # n = 169988 ==> 91 * 1868 = 169988 (G2F)
@@ -73,6 +73,8 @@ def train():
     test_loader = DataLoader(test_dataset, batch_size=batch_size, shuffle=True, num_workers=20, pin_memory=True, drop_last=True)
 
     ### 官方的Gemma #########################################################################################
+    # 2b = 2304, 9b = 3584, 27b = 4608
+    gemma_hiddenstate_size = 2304
     tokenizer = AutoTokenizer.from_pretrained("google/gemma-2-2b-it")
     gemmaConfig = AutoConfig.from_pretrained('google/gemma-2-2b-it')
     ### gemma float32 / bfloat16
@@ -83,7 +85,7 @@ def train():
     # quantization_config = BitsAndBytesConfig(load_in_4bit=True)
     # quantization_config = BitsAndBytesConfig(load_in_8bit=True)
     # gemma = AutoModelForCausalLM.from_pretrained(
-    #     "google/gemma-2-2b-it",
+    #     "google/gemma-2-27b-it",
     #     quantization_config=quantization_config,
     # )
     # gemma = LocalGemma2ForCausalLM.from_pretrained(
@@ -161,8 +163,8 @@ def train():
             self.gemmaSoftmax = nn.Softmax(dim=2)
             self.gemma = nn.Sequential(*list(gemma.children())[:-1])
             # self.gemmaLm_head = nn.Sequential(*list(gemma.children())[1:])
-            self.gemmaLm_headbf = nn.Linear(768, 2304)
-            self.gemmaLm_head = nn.Linear(2304,gemmaConfig.vocab_size)
+            self.gemmaLm_headbf = nn.Linear(768, gemma_hiddenstate_size)
+            self.gemmaLm_head = nn.Linear(gemma_hiddenstate_size,gemmaConfig.vocab_size)
 
             # funny score
             self.FunnyScorelinear1 = nn.Linear(768, 1)
@@ -335,8 +337,8 @@ def train():
                 # contrastive discriminator
                 cd_C_r = C_r.unsqueeze(0).expand(C_r.shape[0], -1, -1, -1)
                 cd_C_g = C_g.unsqueeze(0).expand(C_g.shape[0], -1, -1, -1)
-                d_C_r2f = torch.cat((cd_C_r.transpose(0, 1), cd_C_g), dim=2)
-                d_C_f2r = torch.cat((cd_C_g.transpose(0, 1), cd_C_r), dim=2)
+                d_C_r2f = torch.cat((cd_C_r, cd_C_g.transpose(0, 1)), dim=2)
+                d_C_f2r = torch.cat((cd_C_g, cd_C_r.transpose(0, 1)), dim=2)
 
                 ######################## conditional ########################
                 d_C_r2f = self.d_con_mlp1_r2f(d_C_r2f)
@@ -520,7 +522,8 @@ def train():
                 g_con_logits, g_unc_logits = NetD(text.to(device), logits, image.to(device), "G")
                 d_con_logits, d_unc_logits = NetD(text.to(device).detach(), logits.detach(), image.to(device).detach(),"D")
                 # loss
-                loss_G = generatorLoss(g_con_logits, g_unc_logits) + funnyScoreLoss(output_funny_score, funny_score.to(device))
+                loss_G = generatorLoss(g_con_logits.to(device), g_unc_logits.to(device)) + (
+                            1e+06 * funnyScoreLoss(output_funny_score.to(device), funny_score.to(device)))
                 loss_D = discriminatorLoss(d_con_logits, d_unc_logits)
                 test_loss_G += loss_G.item()
                 test_loss_D += loss_D.item()
