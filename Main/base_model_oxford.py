@@ -69,8 +69,8 @@ def train():
     test_dataset = OxfordDataset(test_text, test_image, test_funny_score)
     # train_loader = DataLoader(train_dataset, batch_size=128, shuffle=True, num_workers=20)
     # test_loader = DataLoader(test_dataset, batch_size=128, shuffle=True, num_workers=20)
-    train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True, num_workers=20, pin_memory=True)
-    test_loader = DataLoader(test_dataset, batch_size=batch_size, shuffle=True, num_workers=20, pin_memory=True)
+    train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True, num_workers=20, pin_memory=True, drop_last=True)
+    test_loader = DataLoader(test_dataset, batch_size=batch_size, shuffle=True, num_workers=20, pin_memory=True, drop_last=True)
 
     ### 官方的Gemma #########################################################################################
     tokenizer = AutoTokenizer.from_pretrained("google/gemma-2-2b-it")
@@ -472,7 +472,7 @@ def train():
                 pre = tepoch.format_dict['elapsed']
 
                 # tepoch.set_postfix({'Now': tepoch.format_dict['elapsed'], 'Status': " Generator Backward - Generator"})
-                loss_G = (1e-06 * generatorLoss(g_con_logits.to(device), g_unc_logits.to(device))) + funnyScoreLoss(output_funny_score.to(device), funny_score.to(device))
+                loss_G = generatorLoss(g_con_logits.to(device), g_unc_logits.to(device)) + (1e+06 * funnyScoreLoss(output_funny_score.to(device), funny_score.to(device)))
                 loss_G.backward(retain_graph=True)
                 train_loss_G += loss_G.item()
                 optimizer_G.step()
