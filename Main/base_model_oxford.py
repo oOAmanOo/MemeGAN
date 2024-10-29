@@ -34,10 +34,10 @@ class OxfordDataset(torch.utils.data.Dataset):
 
 def train():
     epochs = 30
-    batch_size = 128
+    batch_size = 50
     optimizer_G_lr = 1e-5
     optimizer_D_lr = 1e-5
-    save_name = 'test_gemma'
+    save_name = '20241028_lr1e-5_b50'
     # save_name = '20241028'
     if not os.path.exists('./Model/' + save_name):
         os.makedirs('./Model/' + save_name)
@@ -51,7 +51,7 @@ def train():
     # load data
     data = pd.read_csv(dirPath)
     print("shape of data: ", data.shape)
-    # data = data.sample(n=50000, random_state=42, replace=True).reset_index(drop=True)
+    data = data.sample(n=50000, random_state=42, replace=True).reset_index(drop=True)
     # frac = 0.05 ==> 5% of the data = 169904
     # n = 169920 ==> 72 * 2360 = 169920 (F2G)
     # n = 169988 ==> 91 * 1868 = 169988 (G2F)
@@ -288,22 +288,20 @@ def train():
             super(Discriminator, self).__init__()
             # Generator
             self.g_linearFake = nn.Linear(gemmaConfig.vocab_size, 768)
-            self.g_con_mlp1 = nn.Linear(768, 2)
-            self.g_con_mlp2 = nn.Linear(128, 1)
+            self.g_con_mlp1 = nn.Linear(1536, 2)
+            self.g_con_mlp2 = nn.Linear(64, 1)
             self.g_unc_mlp1 = nn.Linear(768, 1)
             self.g_unc_mlp2 = nn.Linear(64, 1)
             # Discriminator
             self.d_linearFake = nn.Linear(gemmaConfig.vocab_size, 768)
-            self.d_con_mlp1_r2f = nn.Linear(768, 2)
-            self.d_con_mlp2_r2f = nn.Linear(256, 1)
-            self.d_con_mlp3_r2f = nn.Linear(batch_size, 1)
-            self.d_con_mlp1_f2r = nn.Linear(768, 2)
-            self.d_con_mlp2_f2r = nn.Linear(256, 1)
-            self.d_con_mlp3_f2r = nn.Linear(batch_size, 1)
-            self.d_con_mlp1_g = nn.Linear(768, 2)
-            self.d_con_mlp2_g = nn.Linear(128, 1)
-            self.d_con_mlp1_m = nn.Linear(768, 2)
-            self.d_con_mlp2_m = nn.Linear(128, 1)
+            self.d_con_mlp1_r2f = nn.Linear(196608, 2)
+            self.d_con_mlp2_r2f = nn.Linear(batch_size, 1)
+            self.d_con_mlp1_f2r = nn.Linear(196608, 2)
+            self.d_con_mlp2_f2r = nn.Linear(batch_size, 1)
+            self.d_con_mlp1_g = nn.Linear(1536, 2)
+            self.d_con_mlp2_g = nn.Linear(64, 1)
+            self.d_con_mlp1_m = nn.Linear(1536, 2)
+            self.d_con_mlp2_m = nn.Linear(64, 1)
             self.d_unc_mlp1_r = nn.Linear(768, 1)
             self.d_unc_mlp2_r = nn.Linear(64, 1)
             self.d_unc_mlp1_g = nn.Linear(768, 1)
@@ -317,7 +315,7 @@ def train():
             # image = [batch_size, 64, 768]
             if GorD == "G":
                 g_fake_text = self.g_linearFake(fake_text)
-                g_C_g = torch.cat((g_fake_text, image), dim=1)
+                g_C_g = torch.cat((g_fake_text, image), dim=-1)
                 ########################  conditional  ########################
                 g_C_g = self.g_con_mlp1(g_C_g)
                 g_C_g = self.g_con_mlp2(g_C_g.transpose(1, 2)).squeeze(-1)
@@ -331,14 +329,16 @@ def train():
             elif GorD == "D":
                 d_fake_text = self.d_linearFake(fake_text)
                 mismatched_text = torch.roll(real_text, 1, 0)
-                C_r = torch.cat((real_text, image), dim=1)
-                C_g = torch.cat((d_fake_text, image), dim=1)
-                C_m = torch.cat((mismatched_text, image), dim=1)
+                C_r = torch.cat((real_text, image), dim=-1)
+                C_g = torch.cat((d_fake_text, image), dim=-1)
+                C_m = torch.cat((mismatched_text, image), dim=-1)
                 # contrastive discriminator
                 cd_C_r = C_r.unsqueeze(0).expand(C_r.shape[0], -1, -1, -1)
                 cd_C_g = C_g.unsqueeze(0).expand(C_g.shape[0], -1, -1, -1)
-                d_C_r2f = torch.cat((cd_C_r, cd_C_g.transpose(0, 1)), dim=2)
-                d_C_f2r = torch.cat((cd_C_g, cd_C_r.transpose(0, 1)), dim=2)
+                d_C_r2f = torch.cat((cd_C_r, cd_C_g.transpose(0, 1)), dim=-1)
+                d_C_f2r = torch.cat((cd_C_g, cd_C_r.transpose(0, 1)), dim=-1)
+                d_C_r2f = d_C_r2f.view(d_C_r2f.shape[0], d_C_r2f.shape[1], -1)
+                d_C_f2r = d_C_f2r.view(d_C_f2r.shape[0], d_C_f2r.shape[1], -1)
 
                 ######################## conditional ########################
                 d_C_r2f = self.d_con_mlp1_r2f(d_C_r2f)
@@ -346,16 +346,14 @@ def train():
                 d_C_g = self.d_con_mlp1_g(C_g)
                 d_C_m = self.d_con_mlp1_m(C_m)
 
-                d_C_r2f = self.d_con_mlp2_r2f(d_C_r2f.transpose(2,3)).squeeze(-1)
-                d_C_f2r = self.d_con_mlp2_r2f(d_C_f2r.transpose(2,3)).squeeze(-1)
+                d_C_r2f = self.d_con_mlp2_r2f(d_C_r2f.transpose(1,2)).squeeze(-1).unsqueeze(0)
+                d_C_f2r = self.d_con_mlp2_r2f(d_C_f2r.transpose(1,2)).squeeze(-1).unsqueeze(0)
                 d_C_g = self.d_con_mlp2_g(d_C_g.transpose(1,2)).squeeze(-1).unsqueeze(0)
                 d_C_m = self.d_con_mlp2_m(d_C_m.transpose(1,2)).squeeze(-1).unsqueeze(0)
 
-                d_C_r2f = self.d_con_mlp3_r2f(d_C_r2f.transpose(1,2)).squeeze(-1).unsqueeze(0)
-                d_C_f2r = self.d_con_mlp3_f2r(d_C_f2r.transpose(1,2)).squeeze(-1).unsqueeze(0)
-
                 d_con_output = torch.cat((d_C_r2f, d_C_f2r, d_C_g, d_C_m), dim=0)
                 ###############################################################
+
                 ######################## unconditional ########################
                 d_UC_r = self.d_unc_mlp1_r(real_text).squeeze(-1)
                 d_UC_g = self.d_unc_mlp1_g(d_fake_text).squeeze(-1)
