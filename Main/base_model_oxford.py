@@ -286,8 +286,8 @@ def train():
     class Discriminator(nn.Module):
         def __init__(self):
             super(Discriminator, self).__init__()
+            self.linearFake = nn.Linear(gemmaConfig.vocab_size, 768)
             # Generator
-            self.g_linearFake = nn.Linear(gemmaConfig.vocab_size, 768)
             self.g_con_mlp1 = nn.Linear(1536, 2)
             self.g_con_mlp2 = nn.Linear(64, 1)
             self.g_unc_mlp1 = nn.Linear(768, 1)
@@ -313,24 +313,23 @@ def train():
             # real_text = [batch_size, 64, 768]
             # fake_text = [batch_size, 64, 256000]
             # image = [batch_size, 64, 768]
+            fake_text = self.linearFake(fake_text)
             if GorD == "G":
-                g_fake_text = self.g_linearFake(fake_text)
-                g_C_g = torch.cat((g_fake_text, image), dim=-1)
+                g_C_g = torch.cat((fake_text, image), dim=-1)
                 ########################  conditional  ########################
                 g_C_g = self.g_con_mlp1(g_C_g)
                 g_C_g = self.g_con_mlp2(g_C_g.transpose(1, 2)).squeeze(-1)
                 ###############################################################
                 ######################## unconditional ########################
-                g_UC_g = self.g_unc_mlp1(g_fake_text).squeeze(-1)
+                g_UC_g = self.g_unc_mlp1(fake_text).squeeze(-1)
                 g_UC_g = self.g_unc_mlp2(g_UC_g).squeeze(-1)
                 ###############################################################
                 return g_C_g, g_UC_g
 
             elif GorD == "D":
-                d_fake_text = self.d_linearFake(fake_text)
                 mismatched_text = torch.roll(real_text, 1, 0)
                 C_r = torch.cat((real_text, image), dim=-1)
-                C_g = torch.cat((d_fake_text, image), dim=-1)
+                C_g = torch.cat((fake_text, image), dim=-1)
                 C_m = torch.cat((mismatched_text, image), dim=-1)
                 # contrastive discriminator
                 cd_C_r = C_r.unsqueeze(0).expand(C_r.shape[0], -1, -1, -1)
@@ -356,7 +355,7 @@ def train():
 
                 ######################## unconditional ########################
                 d_UC_r = self.d_unc_mlp1_r(real_text).squeeze(-1)
-                d_UC_g = self.d_unc_mlp1_g(d_fake_text).squeeze(-1)
+                d_UC_g = self.d_unc_mlp1_g(fake_text).squeeze(-1)
                 d_UC_m = self.d_unc_mlp1_m(mismatched_text).squeeze(-1)
 
                 d_UC_r = self.d_unc_mlp2_r(d_UC_r).squeeze(-1).unsqueeze(0)
