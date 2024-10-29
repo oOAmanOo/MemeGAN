@@ -37,7 +37,7 @@ def train():
     batch_size = 50
     optimizer_G_lr = 1e-5
     optimizer_D_lr = 1e-5
-    save_name = '20241028_lr1e-5_b50'
+    save_name = '20241029_loss_new'
     # save_name = '20241028'
     if not os.path.exists('./Model/' + save_name):
         os.makedirs('./Model/' + save_name)
@@ -384,6 +384,18 @@ def train():
     best_test_loss_G = 9999
     best_test_loss_D = 9999
 
+    # # separate loss
+    # g_fc_loss_list = []
+    # g_con_loss_list = []
+    # g_unc_loss_list = []
+    # d_con_r2f_loss_list = []
+    # d_con_f2r_loss_list = []
+    # d_con_f_loss_list = []
+    # d_con_m_loss_list = []
+    # d_unc_r_loss_list = []
+    # d_unc_f_loss_list = []
+    # d_unc_m_loss_list = []
+
     checkpoint = False
     if checkpoint:
         checkpoint_G = torch.load('./Model/test_save/test_save_2NetG.pth')
@@ -398,6 +410,7 @@ def train():
 
     def funnyScoreLoss(output_funny_score, funny_score):
         loss = nn.MSELoss()(output_funny_score, funny_score)
+        # g_fc_loss_list.append(loss.item())
         return loss
 
     def generatorLoss(condition_logits, uncondition_logits):
@@ -405,6 +418,8 @@ def train():
         result_fake_unc = torch.FloatTensor(condition_logits.shape[0]).to(torch.bfloat16).uniform_(0.0, 0.1).to(device)
         con_loss = CrossEntropyLoss(label_smoothing=0.1)(condition_logits, result_fake_con)
         unc_loss = BCEWithLogitsLoss()(uncondition_logits, result_fake_unc)
+        # g_con_loss_list.append(con_loss.item())
+        # g_unc_loss_list.append(unc_loss.item())
         loss = con_loss + unc_loss
         return loss
 
@@ -421,6 +436,13 @@ def train():
         unc_r = BCEWithLogitsLoss()(uncondition_logits[0], result_true)
         unc_f = BCEWithLogitsLoss()(uncondition_logits[1], result_fake_unc_f)
         unc_m = BCEWithLogitsLoss()(uncondition_logits[2], result_fake_unc_m)
+        # d_con_r2f_loss_list.append(con_r2f.item())
+        # d_con_f2r_loss_list.append(con_f2r.item())
+        # d_con_f_loss_list.append(con_f.item())
+        # d_con_m_loss_list.append(con_m.item())
+        # d_unc_r_loss_list.append(unc_r.item())
+        # d_unc_f_loss_list.append(unc_f.item())
+        # d_unc_m_loss_list.append(unc_m.item())
         loss = ((con_r2f + con_f2r) / 2) + ((con_f + con_m) / 2) + unc_r + ((unc_f + unc_m) / 2)
         return loss
 
@@ -471,7 +493,7 @@ def train():
                 pre = tepoch.format_dict['elapsed']
 
                 # tepoch.set_postfix({'Now': tepoch.format_dict['elapsed'], 'Status': " Generator Backward - Generator"})
-                loss_G = generatorLoss(g_con_logits.to(device), g_unc_logits.to(device)) + (1e+06 * funnyScoreLoss(output_funny_score.to(device), funny_score.to(device)))
+                loss_G = generatorLoss(g_con_logits.to(device), g_unc_logits.to(device)) + (180 * funnyScoreLoss(output_funny_score.to(device), funny_score.to(device)))
                 loss_G.backward(retain_graph=True)
                 train_loss_G += loss_G.item()
                 optimizer_G.step()
@@ -500,6 +522,18 @@ def train():
                                     'GeneratorBackwardG': GeneratorBackwardGTime / (idx + 1),
                                     'DiscriminatorForward': DiscriminatorForwardTime / (idx + 1),
                                     'DiscriminatorBackward': DiscriminatorBackwardTime / (idx + 1)})
+                # sepateLoss = pd.DataFrame()
+                # sepateLoss['g_fc_loss'] = g_fc_loss_list
+                # sepateLoss['g_con_loss'] = g_con_loss_list
+                # sepateLoss['g_unc_loss'] = g_unc_loss_list
+                # sepateLoss['d_con_r2f_loss'] = d_con_r2f_loss_list
+                # sepateLoss['d_con_f2r_loss'] = d_con_f2r_loss_list
+                # sepateLoss['d_con_f_loss'] = d_con_f_loss_list
+                # sepateLoss['d_con_m_loss'] = d_con_m_loss_list
+                # sepateLoss['d_unc_r_loss'] = d_unc_r_loss_list
+                # sepateLoss['d_unc_f_loss'] = d_unc_f_loss_list
+                # sepateLoss['d_unc_m_loss'] = d_unc_m_loss_list
+                # sepateLoss.to_csv('./Model/' + save_name + "/" + save_name + '_sepateLoss.csv', index=False)
                 ######################################################
         train_loss_G /= len(train_loader)
         train_loss_D /= len(train_loader)
@@ -520,7 +554,7 @@ def train():
                 d_con_logits, d_unc_logits = NetD(text.to(device).detach(), logits.detach(), image.to(device).detach(),"D")
                 # loss
                 loss_G = generatorLoss(g_con_logits.to(device), g_unc_logits.to(device)) + (
-                            1e+06 * funnyScoreLoss(output_funny_score.to(device), funny_score.to(device)))
+                            180 * funnyScoreLoss(output_funny_score.to(device), funny_score.to(device)))
                 loss_D = discriminatorLoss(d_con_logits, d_unc_logits)
                 test_loss_G += loss_G.item()
                 test_loss_D += loss_D.item()
