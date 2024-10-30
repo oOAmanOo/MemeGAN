@@ -37,7 +37,7 @@ def train():
     batch_size = 50
     optimizer_G_lr = 1e-5
     optimizer_D_lr = 1e-5
-    save_name = '20241029_correct_reverse'
+    save_name = '20241029_correct_reverse_generate2'
     # save_name = '20241028'
     if not os.path.exists('./Model/' + save_name):
         os.makedirs('./Model/' + save_name)
@@ -170,7 +170,7 @@ def train():
             self.FunnyScorelinear1 = nn.Linear(768, 1)
             self.FunnyScorelinear2 = nn.Linear(64, 1)
 
-        def gemmaGenerate(self, x):
+        def gemmaGenerate(self, x, test, max_new_tokens=200):
             with torch.no_grad():
                 # maximum 32 tokens
                 x = self.gemmaLinearMaxTokens(x.transpose(1, 2)).transpose(1, 2)
@@ -179,13 +179,13 @@ def train():
 
                 # get max value of each row, total 32*64
                 top_k_values, top_k_indices = torch.topk(x2, 1, dim=2, largest=True)
-                toGemma = textExtractReverse(gemma, tokenizer,top_k_indices).to(device)
+                toGemma = textExtractReverse(gemma, tokenizer, gemmaConfig, top_k_indices, test, max_new_tokens).to(device)
                 # 使用gemma作為model的一部分
-                output = self.gemma(toGemma)
+                # output = self.gemma(toGemma)
                 # output[0] = last_hidden_state
                 # output[1] = past_key_values
 
-            return output[0]
+            return toGemma
 
         def forward(self, text, image):
             # max_seq_len = max(text.shape[1], image.shape[1])
@@ -208,13 +208,14 @@ def train():
             feature_fusion_final = feature_fusion_final.squeeze(-1)
             feature_fusion_final = feature_fusion_final.transpose(0, 1)
             ####################### gemma  generate #######################
-            last_hidden_state = self.gemmaGenerate(feature_fusion_final)
-            output_text = self.gemmaLm_head(last_hidden_state)
+            # output_text = self.gemmaGenerate(feature_fusion_final)
+            # output_text = self.gemmaLm_head(last_hidden_state)
             ###############################################################
             # output_text = self.gemmaLm_headbf(feature_fusion_final)
             # output_text = self.gemmaLm_head(output_text)
             ###############################################################
-            output_text = output_text.to(torch.bfloat16)
+            # output_text = output_text.to(torch.bfloat16)
+            output_text = self.gemmaGenerate(feature_fusion_final, False).to(torch.bfloat16)
             ######################### funny score #########################
             output_funny_score = self.FunnyScorelinear1(feature_fusion_final).squeeze(-1)
             output_funny_score = self.FunnyScorelinear2(output_funny_score).squeeze(-1)
@@ -231,62 +232,49 @@ def train():
             tokenizer = AutoTokenizer.from_pretrained("google/gemma-2-2b-it")
             depth = len(self.layers_self_multi)
 
-            # 有時後空格會失效，所以手動插入空格 <pad> = 0
-            def insert_zeros(list):
-                zeros = [0] * (2 * len(list) - 1)
-                zeros[::2] = list
-                return zeros
-
-            lastTurn = False
             with torch.no_grad():
-                for _ in range(max_length + 1):
-                    # Transformer
-                    for i in range(depth):
-                        # self attention
-                        image, text = self.layers_self_multi[i](image, text)
-                        # co-attention
-                        image, text = self.layers_co_attention[i](image, text)
+                # Transformer
+                for i in range(depth):
+                    # self attention
+                    image, text = self.layers_self_multi[i](image, text)
+                    # co-attention
+                    image, text = self.layers_co_attention[i](image, text)
 
-                    # feature fusion
-                    feature_fusion = image + text  # visual_attending_textual + textual_attending_visual
-                    feature_fusion = self.feedForwardLinear(feature_fusion)
-                    feature_fusion = self.feedForwardLayerNorm(feature_fusion + feature_fusion)
-                    feature_fusion = feature_fusion.squeeze(-1)
-                    feature_fusion = feature_fusion.transpose(0, 1)
+                # feature fusion
+                feature_fusion = image + text  # visual_attending_textual + textual_attending_visual
+                feature_fusion = self.feedForwardLinear(feature_fusion)
+                feature_fusion = self.feedForwardLayerNorm(feature_fusion + feature_fusion)
+                feature_fusion = feature_fusion.squeeze(-1)
+                feature_fusion = feature_fusion.transpose(0, 1)
 
-                    # gemma generate
-                    last_hidden_state = self.gemmaGenerate(feature_fusion)
-                    output_text = self.gemmaLm_head(last_hidden_state)
+                # gemma generate
+                # last_hidden_state = self.gemmaGenerate(feature_fusion)
+                # output_text = self.gemmaLm_head(last_hidden_state)
+                output_text = self.gemmaGenerate(feature_fusion, True, max_length).to(torch.bfloat16)
+                text = textExtraction([tokenizer.decode(output_text[0])]).to(device)
 
-                    # funny score
-                    output_funny_score = self.FunnyScorelinear1(feature_fusion).squeeze(-1)
-                    output_funny_score = self.FunnyScorelinear2(output_funny_score).squeeze(-1)
+                for i in range(depth):
+                    # self attention
+                    image, text = self.layers_self_multi[i](image, text)
+                    # co-attention
+                    image, text = self.layers_co_attention[i](image, text)
 
-                    if lastTurn:  # show final funny score
-                        return generated_caption, output_funny_score
-                    else:
-                        next_token_logits = output_text[:, -1, :]
-                        next_token_probs = torch.softmax(next_token_logits, dim=-1)
-                        next_token_id = torch.argmax(next_token_probs, dim=-1).item()
-                        generated_tokens.append(next_token_id)
+                # feature fusion
+                feature_fusion = image + text  # visual_attending_textual + textual_attending_visual
+                feature_fusion = self.feedForwardLinear(feature_fusion)
+                feature_fusion = self.feedForwardLayerNorm(feature_fusion + feature_fusion)
+                feature_fusion = feature_fusion.squeeze(-1)
+                feature_fusion = feature_fusion.transpose(0, 1)
+                # funny score
+                output_funny_score = self.FunnyScorelinear1(feature_fusion).squeeze(-1)
+                output_funny_score = self.FunnyScorelinear2(output_funny_score).squeeze(-1)
 
-                        generated_caption = insert_zeros(generated_tokens)
-                        generated_caption = tokenizer.decode(generated_caption, skip_special_tokens=False)
-                        generated_caption = generated_caption.replace("<pad>", " ").replace("  ", " ").split()
-                        generated_caption = [word for word in generated_caption if word[0] != "<"]
-                        generated_caption = " ".join(generated_caption)
-
-                        text = textExtraction([generated_caption]).to(device)
-                        text = text.transpose(0, 1)
-
-                        if next_token_id in gemmaConfig.eos_token_id or len(generated_caption.split()) > max_length:
-                            # <eos> = 1; <end_of_turn> = 107
-                            lastTurn = True
+            return [output_text, output_funny_score]
 
     class Discriminator(nn.Module):
         def __init__(self):
             super(Discriminator, self).__init__()
-            self.linearFake = nn.Linear(gemmaConfig.vocab_size, 768)
+            # self.linearFake = nn.Linear(gemmaConfig.vocab_size, 768)
             # Generator
             self.g_con_mlp1 = nn.Linear(1536, 2)
             self.g_con_mlp2 = nn.Linear(64, 1)
@@ -294,10 +282,10 @@ def train():
             self.g_unc_mlp2 = nn.Linear(64, 1)
             # Discriminator
             self.d_linearFake = nn.Linear(gemmaConfig.vocab_size, 768)
-            self.d_con_mlp1_r2f = nn.Linear(196608, 2)
-            self.d_con_mlp2_r2f = nn.Linear(batch_size, 1)
-            self.d_con_mlp1_f2r = nn.Linear(196608, 2)
-            self.d_con_mlp2_f2r = nn.Linear(batch_size, 1)
+            self.d_con_mlp1_r2f = nn.Linear(3072, 2)
+            self.d_con_mlp2_r2f = nn.Linear(64, 1)
+            self.d_con_mlp1_f2r = nn.Linear(3072, 2)
+            self.d_con_mlp2_f2r = nn.Linear(64, 1)
             self.d_con_mlp1_g = nn.Linear(1536, 2)
             self.d_con_mlp2_g = nn.Linear(64, 1)
             self.d_con_mlp1_m = nn.Linear(1536, 2)
@@ -313,7 +301,7 @@ def train():
             # real_text = [batch_size, 64, 768]
             # fake_text = [batch_size, 64, 256000]
             # image = [batch_size, 64, 768]
-            fake_text = self.linearFake(fake_text)
+            # fake_text = self.linearFake(fake_text)
             if GorD == "G":
                 g_C_g = torch.cat((fake_text, image), dim=-1)
                 ########################  conditional  ########################
@@ -336,8 +324,6 @@ def train():
                 cd_C_g = C_g.unsqueeze(0).expand(C_g.shape[0], -1, -1, -1)
                 d_C_r2f = torch.cat((cd_C_r, cd_C_g.transpose(0, 1)), dim=-1)
                 d_C_f2r = torch.cat((cd_C_g, cd_C_r.transpose(0, 1)), dim=-1)
-                d_C_r2f = d_C_r2f.view(d_C_r2f.shape[0], d_C_r2f.shape[1], -1)
-                d_C_f2r = d_C_f2r.view(d_C_f2r.shape[0], d_C_f2r.shape[1], -1)
 
                 ######################## conditional ########################
                 d_C_r2f = self.d_con_mlp1_r2f(d_C_r2f)
@@ -345,10 +331,13 @@ def train():
                 d_C_g = self.d_con_mlp1_g(C_g)
                 d_C_m = self.d_con_mlp1_m(C_m)
 
-                d_C_r2f = self.d_con_mlp2_r2f(d_C_r2f.transpose(1,2)).squeeze(-1).unsqueeze(0)
-                d_C_f2r = self.d_con_mlp2_r2f(d_C_f2r.transpose(1,2)).squeeze(-1).unsqueeze(0)
+                d_C_r2f = self.d_con_mlp2_r2f(d_C_r2f.transpose(2,3)).squeeze(-1).unsqueeze(0)
+                d_C_f2r = self.d_con_mlp2_r2f(d_C_f2r.transpose(2,3)).squeeze(-1).unsqueeze(0)
                 d_C_g = self.d_con_mlp2_g(d_C_g.transpose(1,2)).squeeze(-1).unsqueeze(0)
                 d_C_m = self.d_con_mlp2_m(d_C_m.transpose(1,2)).squeeze(-1).unsqueeze(0)
+
+                d_C_r2f = torch.mean(d_C_r2f, dim=-2)
+                d_C_f2r = torch.mean(d_C_f2r, dim=-2)
 
                 d_con_output = torch.cat((d_C_r2f, d_C_f2r, d_C_g, d_C_m), dim=0)
                 ###############################################################
@@ -384,17 +373,17 @@ def train():
     best_test_loss_G = 9999
     best_test_loss_D = 9999
 
-    # # separate loss
-    # g_fc_loss_list = []
-    # g_con_loss_list = []
-    # g_unc_loss_list = []
-    # d_con_r2f_loss_list = []
-    # d_con_f2r_loss_list = []
-    # d_con_f_loss_list = []
-    # d_con_m_loss_list = []
-    # d_unc_r_loss_list = []
-    # d_unc_f_loss_list = []
-    # d_unc_m_loss_list = []
+    # separate loss
+    g_fc_loss_list = []
+    g_con_loss_list = []
+    g_unc_loss_list = []
+    d_con_r2f_loss_list = []
+    d_con_f2r_loss_list = []
+    d_con_f_loss_list = []
+    d_con_m_loss_list = []
+    d_unc_r_loss_list = []
+    d_unc_f_loss_list = []
+    d_unc_m_loss_list = []
 
     checkpoint = False
     if checkpoint:
@@ -410,7 +399,7 @@ def train():
 
     def funnyScoreLoss(output_funny_score, funny_score):
         loss = nn.MSELoss()(output_funny_score, funny_score)
-        # g_fc_loss_list.append(loss.item())
+        g_fc_loss_list.append(loss.item())
         return loss
 
     def generatorLoss(condition_logits, uncondition_logits):
@@ -418,8 +407,8 @@ def train():
         result_fake_unc = torch.FloatTensor(condition_logits.shape[0]).to(torch.bfloat16).uniform_(0.0, 0.1).to(device)
         con_loss = CrossEntropyLoss(label_smoothing=0.1)(condition_logits, result_fake_con)
         unc_loss = BCEWithLogitsLoss()(uncondition_logits, result_fake_unc)
-        # g_con_loss_list.append(con_loss.item())
-        # g_unc_loss_list.append(unc_loss.item())
+        g_con_loss_list.append(con_loss.item())
+        g_unc_loss_list.append(unc_loss.item())
         loss = con_loss + unc_loss
         return loss
 
@@ -436,13 +425,13 @@ def train():
         unc_r = BCEWithLogitsLoss()(uncondition_logits[0], result_true)
         unc_f = BCEWithLogitsLoss()(uncondition_logits[1], result_fake_unc_f)
         unc_m = BCEWithLogitsLoss()(uncondition_logits[2], result_fake_unc_m)
-        # d_con_r2f_loss_list.append(con_r2f.item())
-        # d_con_f2r_loss_list.append(con_f2r.item())
-        # d_con_f_loss_list.append(con_f.item())
-        # d_con_m_loss_list.append(con_m.item())
-        # d_unc_r_loss_list.append(unc_r.item())
-        # d_unc_f_loss_list.append(unc_f.item())
-        # d_unc_m_loss_list.append(unc_m.item())
+        d_con_r2f_loss_list.append(con_r2f.item())
+        d_con_f2r_loss_list.append(con_f2r.item())
+        d_con_f_loss_list.append(con_f.item())
+        d_con_m_loss_list.append(con_m.item())
+        d_unc_r_loss_list.append(unc_r.item())
+        d_unc_f_loss_list.append(unc_f.item())
+        d_unc_m_loss_list.append(unc_m.item())
         loss = ((con_r2f + con_f2r) / 2) + ((con_f + con_m) / 2) + unc_r + ((unc_f + unc_m) / 2)
         return loss
 
@@ -493,7 +482,8 @@ def train():
                 pre = tepoch.format_dict['elapsed']
 
                 # tepoch.set_postfix({'Now': tepoch.format_dict['elapsed'], 'Status': " Generator Backward - Generator"})
-                loss_G = generatorLoss(g_con_logits.to(device), g_unc_logits.to(device)) + (180 * funnyScoreLoss(output_funny_score.to(device), funny_score.to(device)))
+                loss_G = generatorLoss(g_con_logits.to(device), g_unc_logits.to(device)) + (
+                            1 * funnyScoreLoss(output_funny_score.to(device), funny_score.to(device)))
                 loss_G.backward(retain_graph=True)
                 train_loss_G += loss_G.item()
                 optimizer_G.step()
@@ -522,18 +512,18 @@ def train():
                                     'GeneratorBackwardG': GeneratorBackwardGTime / (idx + 1),
                                     'DiscriminatorForward': DiscriminatorForwardTime / (idx + 1),
                                     'DiscriminatorBackward': DiscriminatorBackwardTime / (idx + 1)})
-                # sepateLoss = pd.DataFrame()
-                # sepateLoss['g_fc_loss'] = g_fc_loss_list
-                # sepateLoss['g_con_loss'] = g_con_loss_list
-                # sepateLoss['g_unc_loss'] = g_unc_loss_list
-                # sepateLoss['d_con_r2f_loss'] = d_con_r2f_loss_list
-                # sepateLoss['d_con_f2r_loss'] = d_con_f2r_loss_list
-                # sepateLoss['d_con_f_loss'] = d_con_f_loss_list
-                # sepateLoss['d_con_m_loss'] = d_con_m_loss_list
-                # sepateLoss['d_unc_r_loss'] = d_unc_r_loss_list
-                # sepateLoss['d_unc_f_loss'] = d_unc_f_loss_list
-                # sepateLoss['d_unc_m_loss'] = d_unc_m_loss_list
-                # sepateLoss.to_csv('./Model/' + save_name + "/" + save_name + '_sepateLoss.csv', index=False)
+                sepateLoss = pd.DataFrame()
+                sepateLoss['g_fc_loss'] = g_fc_loss_list
+                sepateLoss['g_con_loss'] = g_con_loss_list
+                sepateLoss['g_unc_loss'] = g_unc_loss_list
+                sepateLoss['d_con_r2f_loss'] = d_con_r2f_loss_list
+                sepateLoss['d_con_f2r_loss'] = d_con_f2r_loss_list
+                sepateLoss['d_con_f_loss'] = d_con_f_loss_list
+                sepateLoss['d_con_m_loss'] = d_con_m_loss_list
+                sepateLoss['d_unc_r_loss'] = d_unc_r_loss_list
+                sepateLoss['d_unc_f_loss'] = d_unc_f_loss_list
+                sepateLoss['d_unc_m_loss'] = d_unc_m_loss_list
+                sepateLoss.to_csv('./Model/' + save_name + "/" + save_name + '_sepateLoss.csv', index=False)
                 ######################################################
         train_loss_G /= len(train_loader)
         train_loss_D /= len(train_loader)
@@ -554,7 +544,7 @@ def train():
                 d_con_logits, d_unc_logits = NetD(text.to(device).detach(), logits.detach(), image.to(device).detach(),"D")
                 # loss
                 loss_G = generatorLoss(g_con_logits.to(device), g_unc_logits.to(device)) + (
-                            180 * funnyScoreLoss(output_funny_score.to(device), funny_score.to(device)))
+                            1 * funnyScoreLoss(output_funny_score.to(device), funny_score.to(device)))
                 loss_D = discriminatorLoss(d_con_logits, d_unc_logits)
                 test_loss_G += loss_G.item()
                 test_loss_D += loss_D.item()
