@@ -48,14 +48,12 @@ def textExtractReverse(gemma, tokenizer, data):
     reverse = tokenizer.batch_decode(reverse_data, skip_special_tokens=False)
     # tokenize with gemma-2b
     prompt = "Write a humor memetic post for Instagram with the following elements: "
-    # all_features = []
+    tokens = []
     for i, text in enumerate(reverse):
         text = text.replace("<pad>", " ").replace("  ", " ")
         text = set(text.split())
         text = ', '.join(text)
         reverse[i] = prompt + text + "."
-    tokens = []
-    for i in range(len(reverse)):
         temp = tokenizer(reverse[i], truncation=True, padding='max_length', max_length=64, return_tensors='pt')
         tokens.append(temp['input_ids'])
     return torch.cat(tokens)
