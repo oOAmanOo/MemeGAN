@@ -294,10 +294,10 @@ def train():
             self.g_unc_mlp2 = nn.Linear(64, 1)
             # Discriminator
             self.d_linearFake = nn.Linear(gemmaConfig.vocab_size, 768)
-            self.d_con_mlp1_r2f = nn.Linear(196608, 2)
-            self.d_con_mlp2_r2f = nn.Linear(batch_size, 1)
-            self.d_con_mlp1_f2r = nn.Linear(196608, 2)
-            self.d_con_mlp2_f2r = nn.Linear(batch_size, 1)
+            self.d_con_mlp1_r2f = nn.Linear(3072, 2)
+            self.d_con_mlp2_r2f = nn.Linear(64, 1)
+            self.d_con_mlp1_f2r = nn.Linear(3072, 2)
+            self.d_con_mlp2_f2r = nn.Linear(64, 1)
             self.d_con_mlp1_g = nn.Linear(1536, 2)
             self.d_con_mlp2_g = nn.Linear(64, 1)
             self.d_con_mlp1_m = nn.Linear(1536, 2)
@@ -349,6 +349,9 @@ def train():
                 d_C_f2r = self.d_con_mlp2_r2f(d_C_f2r.transpose(1,2)).squeeze(-1).unsqueeze(0)
                 d_C_g = self.d_con_mlp2_g(d_C_g.transpose(1,2)).squeeze(-1).unsqueeze(0)
                 d_C_m = self.d_con_mlp2_m(d_C_m.transpose(1,2)).squeeze(-1).unsqueeze(0)
+
+                d_C_r2f = torch.mean(d_C_r2f, dim=-2)
+                d_C_f2r = torch.mean(d_C_f2r, dim=-2)
 
                 d_con_output = torch.cat((d_C_r2f, d_C_f2r, d_C_g, d_C_m), dim=0)
                 ###############################################################
