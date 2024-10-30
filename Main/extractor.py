@@ -35,9 +35,7 @@ def textExtraction(tokenizer, gemmaConfig, text_data):
             # pbar.update(1)
     return torch.cat(all_features)
 
-def textExtractReverse(data):
-    tokenizer = AutoTokenizer.from_pretrained("google/gemma-2-2b-it")
-
+def textExtractReverse(gemma, tokenizer, data):
     # 有時後空格會失效，所以手動插入空格 <pad> = 0
     def insert_zeros(tensor):
         zeros = torch.zeros(tensor.shape[0], tensor.shape[1] * 2 - 1)
@@ -49,17 +47,18 @@ def textExtractReverse(data):
     # reverse the token
     reverse = tokenizer.batch_decode(reverse_data, skip_special_tokens=False)
     # tokenize with gemma-2b
-    tokenizer_gemma = AutoTokenizer.from_pretrained("google/gemma-2-2b-it")
     prompt = "Write a humor memetic post for Instagram with the following elements: "
     # all_features = []
     for i, text in enumerate(reverse):
         text = text.replace("<pad>", " ").replace("  ", " ")
-        text = text.split()
+        text = set(text.split())
         text = ', '.join(text)
         reverse[i] = prompt + text + "."
-    tokens = tokenizer_gemma(reverse, truncation=True, padding='max_length', max_length=64, return_tensors='pt')
-    # all_features.append(tokens['input_ids'])
-    return tokens['input_ids']
+    tokens = []
+    for i in range(len(reverse)):
+        temp = tokenizer(reverse[i], truncation=True, padding='max_length', max_length=64, return_tensors='pt')
+        tokens.append(temp['input_ids'])
+    return torch.cat(tokens)
 
 # 定義批量處理和提取特徵的函數
 def imageExtraction(image_data):
@@ -75,23 +74,23 @@ def imageExtraction(image_data):
     swin.to(device)
 
     all_features = []
-    with tqdm.tqdm(total=len(image_data), position=0, leave=True) as pbar:
-        for image_path in (image_data):
-            with torch.no_grad():
+    # with tqdm.tqdm(total=len(image_data), position=0, leave=True) as pbar:
+    #     for image_path in (image_data):
+    #         with torch.no_grad():
                 # 加載並預處理圖像
-                image = Image.open(image_path).convert('RGB')
-                image = np.array(image)
-                image = image[:, :, :3]
-                # 使用 image_processor 將 batch 圖片處理成適合模型的格式
-                inputs = image_processor(image, return_tensors="pt")
-                # 將 inputs 放到 GPU 上（如果可用）
-                inputs.to(device)
-                # 獲取 Swinv2 模型的輸出
-                outputs = swin(**inputs)
-                last_hidden_states = outputs.last_hidden_state
-                # 儲存特徵
-                last_hidden_states = last_hidden_states.cpu()
-                all_features.append(last_hidden_states.squeeze(0).detach())
-                pbar.update(1)
-    return all_features
-
+    image = Image.open(image_data).convert('RGB')
+    image = np.array(image)
+    image = image[:, :, :3]
+    # 使用 image_processor 將 batch 圖片處理成適合模型的格式
+    inputs = image_processor(image, return_tensors="pt")
+    # 將 inputs 放到 GPU 上（如果可用）
+    inputs.to(device)
+    # 獲取 Swinv2 模型的輸出
+    outputs = swin(**inputs)
+    last_hidden_states = outputs.last_hidden_state
+    # 儲存特徵
+    last_hidden_states = last_hidden_states.cpu()
+    all_features.append(last_hidden_states.squeeze(0).detach())
+                # pbar.update(1)
+    # return all_features
+    return last_hidden_states.detach()

@@ -37,7 +37,7 @@ def train():
     batch_size = 50
     optimizer_G_lr = 1e-5
     optimizer_D_lr = 1e-5
-    save_name = '20241029_loss_new'
+    save_name = '20241029_correct_reverse'
     # save_name = '20241028'
     if not os.path.exists('./Model/' + save_name):
         os.makedirs('./Model/' + save_name)
@@ -179,7 +179,7 @@ def train():
 
                 # get max value of each row, total 32*64
                 top_k_values, top_k_indices = torch.topk(x2, 1, dim=2, largest=True)
-                toGemma = textExtractReverse(top_k_indices).to(device)
+                toGemma = textExtractReverse(gemma, tokenizer,top_k_indices).to(device)
                 # 使用gemma作為model的一部分
                 output = self.gemma(toGemma)
                 # output[0] = last_hidden_state
