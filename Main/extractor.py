@@ -14,7 +14,7 @@ def addImagePath(data, imgPath):
 
 def textExtraction(tokenizer, gemmaConfig, text_data):
     # tokenizer = AutoTokenizer.from_pretrained("google/gemma-2-2b-it")
-    # gemmaConfig = AutoConfig.from_pretrained('google/gemma-2-2b-it')
+    gemmaConfig = AutoConfig.from_pretrained('google/gemma-2-2b-it')
     vocab_size = gemmaConfig.vocab_size  # 詞彙表大小
 
     embedding_dim = 768  # 嵌入维度，與你的圖片嵌入维度相同
@@ -35,7 +35,8 @@ def textExtraction(tokenizer, gemmaConfig, text_data):
             # pbar.update(1)
     return torch.cat(all_features)
 
-def textExtractReverse(gemma, tokenizer, data):
+def textExtractReverse(gemma, tokenizer, data, Test = False):
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     # 有時後空格會失效，所以手動插入空格 <pad> = 0
     def insert_zeros(tensor):
         zeros = torch.zeros(tensor.shape[0], tensor.shape[1] * 2 - 1)
@@ -54,7 +55,11 @@ def textExtractReverse(gemma, tokenizer, data):
         text = set(text.split())
         text = ', '.join(text)
         reverse[i] = prompt + text + "."
-        temp = tokenizer(reverse[i], truncation=True, padding='max_length', max_length=64, return_tensors='pt')
+        temp = tokenizer(reverse[i], truncation=True, padding='max_length', max_length=64, return_tensors='pt').to(device)
+        if Test:
+            outputs = gemma.generate(**temp, max_new_tokens=1000)
+            outputs = tokenizer.decode(outputs[0])
+            print(outputs)
         tokens.append(temp['input_ids'])
     return torch.cat(tokens)
 
