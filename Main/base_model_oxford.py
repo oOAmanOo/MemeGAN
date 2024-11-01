@@ -122,7 +122,7 @@ def train():
 
             # multihead attention module
             multi_out = self.multiheadAttentionMultihead(text, text, text)[0]
-            multi_out = self.multiheadAttentionLinear(multi_out)
+            multi_out = self.multiheadAttentionLinear1(multi_out)
             multi_out = self.multiheadAttentionRelu(multi_out)
             multi_out = self.multiheadAttentionLinear2(multi_out)
             multi_out = self.multiheadAttentionLayerNorm(multi_out + text)
@@ -143,7 +143,7 @@ def train():
             self.coAttentionImageMultihead = nn.MultiheadAttention(768, 1)
             self.coAttentionImageLinear1 = nn.Linear(768, 768)
             self.coAttentionImageRelu = nn.ReLU()
-            self.coAttentionImageLinear2 = nn.Linear(768, 768
+            self.coAttentionImageLinear2 = nn.Linear(768, 768)
             self.coAttentionImageLayerNorm = nn.LayerNorm(768, eps=eps)
 
         def forward(self, image, text):
