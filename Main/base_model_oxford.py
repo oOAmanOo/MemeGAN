@@ -34,10 +34,10 @@ class OxfordDataset(torch.utils.data.Dataset):
 
 def train():
     epochs = 30
-    batch_size = 50
-    optimizer_G_lr = 1e-5
-    optimizer_D_lr = 1e-5
-    save_name = '20241029_correct_reverse'
+    batch_size = 40
+    optimizer_G_lr = 1e-6
+    optimizer_D_lr = 1e-6
+    save_name = '20241029_nogemma'
     # save_name = '20241028'
     if not os.path.exists('./Model/' + save_name):
         os.makedirs('./Model/' + save_name)
@@ -208,11 +208,11 @@ def train():
             feature_fusion_final = feature_fusion_final.squeeze(-1)
             feature_fusion_final = feature_fusion_final.transpose(0, 1)
             ####################### gemma  generate #######################
-            last_hidden_state = self.gemmaGenerate(feature_fusion_final)
-            output_text = self.gemmaLm_head(last_hidden_state)
+            # last_hidden_state = self.gemmaGenerate(feature_fusion_final)
+            # output_text = self.gemmaLm_head(last_hidden_state)
             ###############################################################
-            # output_text = self.gemmaLm_headbf(feature_fusion_final)
-            # output_text = self.gemmaLm_head(output_text)
+            output_text = self.gemmaLm_headbf(feature_fusion_final)
+            output_text = self.gemmaLm_head(output_text)
             ###############################################################
             output_text = output_text.to(torch.bfloat16)
             ######################### funny score #########################
@@ -249,14 +249,18 @@ def train():
 
                     # feature fusion
                     feature_fusion = image + text  # visual_attending_textual + textual_attending_visual
-                    feature_fusion = self.feedForwardLinear(feature_fusion)
-                    feature_fusion = self.feedForwardLayerNorm(feature_fusion + feature_fusion)
-                    feature_fusion = feature_fusion.squeeze(-1)
-                    feature_fusion = feature_fusion.transpose(0, 1)
-
-                    # gemma generate
-                    last_hidden_state = self.gemmaGenerate(feature_fusion)
-                    output_text = self.gemmaLm_head(last_hidden_state)
+                    feature_fusionFF = self.feedForwardLinear(feature_fusion)
+                    feature_fusion_final = self.feedForwardLayerNorm(feature_fusion + feature_fusionFF)
+                    feature_fusion_final = feature_fusion_final.squeeze(-1)
+                    feature_fusion_final = feature_fusion_final.transpose(0, 1)
+                    ####################### gemma  generate #######################
+                    # last_hidden_state = self.gemmaGenerate(feature_fusion_final)
+                    # output_text = self.gemmaLm_head(last_hidden_state)
+                    ###############################################################
+                    output_text = self.gemmaLm_headbf(feature_fusion_final)
+                    output_text = self.gemmaLm_head(output_text)
+                    ###############################################################
+                    output_text = output_text.to(torch.bfloat16)
 
                     # funny score
                     output_funny_score = self.FunnyScorelinear1(feature_fusion).squeeze(-1)
@@ -276,7 +280,7 @@ def train():
                         generated_caption = [word for word in generated_caption if word[0] != "<"]
                         generated_caption = " ".join(generated_caption)
 
-                        text = textExtraction([generated_caption]).to(device)
+                        text = textExtraction(tokenizer, gemmaConfig, [generated_caption]).to(device).to(torch.bfloat16)
                         text = text.transpose(0, 1)
 
                         if next_token_id in gemmaConfig.eos_token_id or len(generated_caption.split()) > max_length:
@@ -371,8 +375,10 @@ def train():
 
     NetG = Generator().to(torch.bfloat16).to(device)
     NetD = Discriminator().to(torch.bfloat16).to(device)
-    optimizer_G = optim.Adam(NetG.parameters(), lr=optimizer_G_lr)
-    optimizer_D = optim.Adam(NetD.parameters(), lr=optimizer_D_lr)
+    optimizer_G = optim.AdamW(NetG.parameters(), lr=optimizer_G_lr, weight_decay=1e-3)
+    optimizer_D = optim.AdamW(NetD.parameters(), lr=optimizer_D_lr, weight_decay=1e-3)
+    # optimizer_G = optim.Adam(NetG.parameters(), lr=optimizer_G_lr)
+    # optimizer_D = optim.Adam(NetD.parameters(), lr=optimizer_D_lr)
 
     train_losses_G = []
     train_losses_D = []

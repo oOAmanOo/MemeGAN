@@ -124,7 +124,7 @@ class Generator(nn.Module):
 
             # get max value of each row, total 32*64
             top_k_values, top_k_indices = torch.topk(x2, 1, dim=2, largest=True)
-            toGemma = textExtractReverse(gemma, tokenizer,top_k_indices).to(device)
+            toGemma = textExtractReverse(gemma, tokenizer, top_k_indices).to(device)
             # 使用gemma作為model的一部分
             output = self.gemma(toGemma)
             # output[0] = last_hidden_state
@@ -153,11 +153,11 @@ class Generator(nn.Module):
         feature_fusion_final = feature_fusion_final.squeeze(-1)
         feature_fusion_final = feature_fusion_final.transpose(0, 1)
         ####################### gemma  generate #######################
-        last_hidden_state = self.gemmaGenerate(feature_fusion_final)
-        output_text = self.gemmaLm_head(last_hidden_state)
+        # last_hidden_state = self.gemmaGenerate(feature_fusion_final)
+        # output_text = self.gemmaLm_head(last_hidden_state)
         ###############################################################
-        # output_text = self.gemmaLm_headbf(feature_fusion_final)
-        # output_text = self.gemmaLm_head(output_text)
+        output_text = self.gemmaLm_headbf(feature_fusion_final)
+        output_text = self.gemmaLm_head(output_text)
         ###############################################################
         output_text = output_text.to(torch.bfloat16)
         ######################### funny score #########################
@@ -194,17 +194,21 @@ class Generator(nn.Module):
 
                 # feature fusion
                 feature_fusion = image + text  # visual_attending_textual + textual_attending_visual
-                feature_fusion = self.feedForwardLinear(feature_fusion)
-                feature_fusion = self.feedForwardLayerNorm(feature_fusion + feature_fusion)
-                feature_fusion = feature_fusion.squeeze(-1)
-                feature_fusion = feature_fusion.transpose(0, 1)
-
-                # gemma generate
-                last_hidden_state = self.gemmaGenerate(feature_fusion)
-                output_text = self.gemmaLm_head(last_hidden_state)
+                feature_fusionFF = self.feedForwardLinear(feature_fusion)
+                feature_fusion_final = self.feedForwardLayerNorm(feature_fusion + feature_fusionFF)
+                feature_fusion_final = feature_fusion_final.squeeze(-1)
+                feature_fusion_final = feature_fusion_final.transpose(0, 1)
+                ####################### gemma  generate #######################
+                # last_hidden_state = self.gemmaGenerate(feature_fusion_final)
+                # output_text = self.gemmaLm_head(last_hidden_state)
+                ###############################################################
+                output_text = self.gemmaLm_headbf(feature_fusion_final)
+                output_text = self.gemmaLm_head(output_text)
+                ###############################################################
+                output_text = output_text.to(torch.bfloat16)
 
                 # funny score
-                output_funny_score = self.FunnyScorelinear1(feature_fusion).squeeze(-1)
+                output_funny_score = self.FunnyScorelinear1(feature_fusion_final).squeeze(-1)
                 output_funny_score = self.FunnyScorelinear2(output_funny_score).squeeze(-1)
 
                 if lastTurn:  # show final funny score
@@ -220,6 +224,7 @@ class Generator(nn.Module):
                     generated_caption = generated_caption.replace("<pad>", " ").replace("  ", " ").split()
                     generated_caption = [word for word in generated_caption if word[0] != "<"]
                     generated_caption = " ".join(generated_caption)
+                    print(generated_caption)
 
                     text = textExtraction(tokenizer, gemmaConfig, [generated_caption]).to(device).to(torch.bfloat16)
                     text = text.transpose(0, 1)
@@ -227,6 +232,7 @@ class Generator(nn.Module):
                     if next_token_id in gemmaConfig.eos_token_id or len(generated_caption.split()) > max_length:
                         # <eos> = 1; <end_of_turn> = 107
                         lastTurn = True
+        return generated_caption, output_funny_score
 
 
 class Discriminator(nn.Module):
@@ -240,10 +246,10 @@ class Discriminator(nn.Module):
         self.g_unc_mlp2 = nn.Linear(64, 1)
         # Discriminator
         self.d_linearFake = nn.Linear(gemmaConfig.vocab_size, 768)
-        self.d_con_mlp1_r2f = nn.Linear(196608, 2)
-        self.d_con_mlp2_r2f = nn.Linear(batch_size, 1)
-        self.d_con_mlp1_f2r = nn.Linear(196608, 2)
-        self.d_con_mlp2_f2r = nn.Linear(batch_size, 1)
+        self.d_con_mlp1_r2f = nn.Linear(3072, 2)
+        self.d_con_mlp2_r2f = nn.Linear(64, 1)
+        self.d_con_mlp1_f2r = nn.Linear(3072, 2)
+        self.d_con_mlp2_f2r = nn.Linear(64, 1)
         self.d_con_mlp1_g = nn.Linear(1536, 2)
         self.d_con_mlp2_g = nn.Linear(64, 1)
         self.d_con_mlp1_m = nn.Linear(1536, 2)
@@ -282,8 +288,6 @@ class Discriminator(nn.Module):
             cd_C_g = C_g.unsqueeze(0).expand(C_g.shape[0], -1, -1, -1)
             d_C_r2f = torch.cat((cd_C_r, cd_C_g.transpose(0, 1)), dim=-1)
             d_C_f2r = torch.cat((cd_C_g, cd_C_r.transpose(0, 1)), dim=-1)
-            d_C_r2f = d_C_r2f.view(d_C_r2f.shape[0], d_C_r2f.shape[1], -1)
-            d_C_f2r = d_C_f2r.view(d_C_f2r.shape[0], d_C_f2r.shape[1], -1)
 
             ######################## conditional ########################
             d_C_r2f = self.d_con_mlp1_r2f(d_C_r2f)
@@ -291,10 +295,13 @@ class Discriminator(nn.Module):
             d_C_g = self.d_con_mlp1_g(C_g)
             d_C_m = self.d_con_mlp1_m(C_m)
 
-            d_C_r2f = self.d_con_mlp2_r2f(d_C_r2f.transpose(1, 2)).squeeze(-1).unsqueeze(0)
-            d_C_f2r = self.d_con_mlp2_r2f(d_C_f2r.transpose(1, 2)).squeeze(-1).unsqueeze(0)
+            d_C_r2f = self.d_con_mlp2_r2f(d_C_r2f.transpose(2, 3)).squeeze(-1).unsqueeze(0)
+            d_C_f2r = self.d_con_mlp2_r2f(d_C_f2r.transpose(2, 3)).squeeze(-1).unsqueeze(0)
             d_C_g = self.d_con_mlp2_g(d_C_g.transpose(1, 2)).squeeze(-1).unsqueeze(0)
             d_C_m = self.d_con_mlp2_m(d_C_m.transpose(1, 2)).squeeze(-1).unsqueeze(0)
+
+            d_C_r2f = torch.mean(d_C_r2f, dim=-2)
+            d_C_f2r = torch.mean(d_C_f2r, dim=-2)
 
             d_con_output = torch.cat((d_C_r2f, d_C_f2r, d_C_g, d_C_m), dim=0)
             ###############################################################
@@ -317,8 +324,8 @@ device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 #load model
 NetG = Generator().to(torch.bfloat16).to(device)
 NetD = Discriminator().to(torch.bfloat16).to(device)
-checkpoint_G = torch.load('./Model/20241029_1e-6/20241029_1e-6_NetG_5.pth')
-checkpoint_D = torch.load('./Model/20241029_1e-6/20241029_1e-6_NetD_5.pth')
+checkpoint_G = torch.load('./Model/20241029_nogemma/20241029_nogemma_NetG_12.pth')
+checkpoint_D = torch.load('./Model/20241029_nogemma/20241029_nogemma_NetD_12.pth')
 NetG.load_state_dict(checkpoint_G['model_state_dict'])
 NetD.load_state_dict(checkpoint_D['model_state_dict'])
 # optimizer_G.load_state_dict(checkpoint_G['optimizer_state_dict'])
