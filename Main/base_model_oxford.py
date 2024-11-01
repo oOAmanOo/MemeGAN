@@ -37,7 +37,7 @@ def train():
     batch_size = 50
     optimizer_G_lr = 1e-5
     optimizer_D_lr = 1e-5
-    save_name = '20241029_correct_reverse'
+    save_name = '20241101_1e-5'
     # save_name = '20241028'
     if not os.path.exists('./Model/' + save_name):
         os.makedirs('./Model/' + save_name)
@@ -100,23 +100,31 @@ def train():
             # self attention
             self.selfAttentionMultihead = nn.MultiheadAttention(768, 1)
             self.selfAttentionLayerNorm = nn.LayerNorm(768, eps=eps)
-            self.selfAttentionLinear = nn.Linear(768, 768)
+            self.selfAttentionLinear1 = nn.Linear(768, 768)
+            self.selfAttentionRelu = nn.ReLU()
+            self.selfAttentionLinear2 = nn.Linear(768, 768)
             self.selfAttentionLayerNorm2 = nn.LayerNorm(768, eps=eps)
 
             # multihead attention
             self.multiheadAttentionMultihead = nn.MultiheadAttention(768, 8)
-            self.multiheadAttentionLinear = nn.Linear(768, 768)
+            self.multiheadAttentionLinear1 = nn.Linear(768, 768)
+            self.multiheadAttentionRelu = nn.ReLU()
+            self.multiheadAttentionLinear2 = nn.Linear(768, 768)
             self.multiheadAttentionLayerNorm = nn.LayerNorm(768, eps=eps)
 
         def forward(self, image, text):
             # self attention module
             self_out = self.selfAttentionMultihead(image, image, image)[0]
-            self_out = self.selfAttentionLinear(self_out)
+            self_out = self.selfAttentionLinear1(self_out)
+            self_out = self.selfAttentionRelu(self_out)
+            self_out = self.selfAttentionLinear2(self_out)
             self_out = self.selfAttentionLayerNorm(self_out + image)
 
             # multihead attention module
             multi_out = self.multiheadAttentionMultihead(text, text, text)[0]
             multi_out = self.multiheadAttentionLinear(multi_out)
+            multi_out = self.multiheadAttentionRelu(multi_out)
+            multi_out = self.multiheadAttentionLinear2(multi_out)
             multi_out = self.multiheadAttentionLayerNorm(multi_out + text)
 
             return self_out, multi_out
@@ -126,23 +134,31 @@ def train():
             super(co_attention, self).__init__()
             # co-attention text
             self.coAttentionTextMultihead = nn.MultiheadAttention(768, 1)
-            self.coAttentionTextLinear = nn.Linear(768, 768)
+            self.coAttentionTextLinear1 = nn.Linear(768, 768)
+            self.coAttentionTextRelu = nn.ReLU()
+            self.coAttentionTextLinear2 = nn.Linear(768, 768)
             self.coAttentionTextLayerNorm = nn.LayerNorm(768, eps=eps)
 
             # co-attention image
             self.coAttentionImageMultihead = nn.MultiheadAttention(768, 1)
-            self.coAttentionImageLinear = nn.Linear(768, 768)
+            self.coAttentionImageLinear1 = nn.Linear(768, 768)
+            self.coAttentionImageRelu = nn.ReLU()
+            self.coAttentionImageLinear2 = nn.Linear(768, 768
             self.coAttentionImageLayerNorm = nn.LayerNorm(768, eps=eps)
 
         def forward(self, image, text):
             # co-attention image module
             visual_attending_textual = self.coAttentionTextMultihead(image, text, text)[0]
-            visual_attending_textual = self.coAttentionTextLinear(visual_attending_textual)
+            visual_attending_textual = self.coAttentionTextLinear1(visual_attending_textual)
+            visual_attending_textual = self.coAttentionTextRelu(visual_attending_textual)
+            visual_attending_textual = self.coAttentionTextLinear2(visual_attending_textual)
             visual_attending_textual = self.coAttentionTextLayerNorm(visual_attending_textual + image)
 
             # co-attention text module
             textual_attending_visual = self.coAttentionTextMultihead(text, image, image)[0]
-            textual_attending_visual = self.coAttentionTextLinear(textual_attending_visual)
+            textual_attending_visual = self.coAttentionTextLinear1(textual_attending_visual)
+            textual_attending_visual = self.coAttentionTextRelu(textual_attending_visual)
+            textual_attending_visual = self.coAttentionTextLinear2(textual_attending_visual)
             textual_attending_visual = self.coAttentionTextLayerNorm(textual_attending_visual + text)
 
             return visual_attending_textual, textual_attending_visual
@@ -294,20 +310,12 @@ def train():
             self.g_unc_mlp2 = nn.Linear(64, 1)
             # Discriminator
             self.d_linearFake = nn.Linear(gemmaConfig.vocab_size, 768)
-            self.d_con_mlp1_r2f = nn.Linear(3072, 2)
-            self.d_con_mlp2_r2f = nn.Linear(64, 1)
-            self.d_con_mlp1_f2r = nn.Linear(3072, 2)
-            self.d_con_mlp2_f2r = nn.Linear(64, 1)
-            self.d_con_mlp1_g = nn.Linear(1536, 2)
-            self.d_con_mlp2_g = nn.Linear(64, 1)
-            self.d_con_mlp1_m = nn.Linear(1536, 2)
-            self.d_con_mlp2_m = nn.Linear(64, 1)
-            self.d_unc_mlp1_r = nn.Linear(768, 1)
-            self.d_unc_mlp2_r = nn.Linear(64, 1)
-            self.d_unc_mlp1_g = nn.Linear(768, 1)
-            self.d_unc_mlp2_g = nn.Linear(64, 1)
-            self.d_unc_mlp1_m = nn.Linear(768, 1)
-            self.d_unc_mlp2_m = nn.Linear(64, 1)
+            self.d_con_mlp1_cd = nn.Linear(3072, 2)
+            self.d_con_mlp2_cd = nn.Linear(64, 1)
+            self.d_con_mlp1 = nn.Linear(1536, 2)
+            self.d_con_mlp2 = nn.Linear(64, 1)
+            self.d_unc_mlp1 = nn.Linear(768, 1)
+            self.d_unc_mlp2 = nn.Linear(64, 1)
 
         def forward(self, real_text, fake_text, image, GorD):
             # real_text = [batch_size, 64, 768]
@@ -338,16 +346,18 @@ def train():
                 d_C_f2r = torch.cat((cd_C_g, cd_C_r.transpose(0, 1)), dim=-1)
 
                 ######################## conditional ########################
-                d_C_r2f = self.d_con_mlp1_r2f(d_C_r2f)
-                d_C_f2r = self.d_con_mlp1_f2r(d_C_f2r)
-                d_C_g = self.d_con_mlp1_g(C_g)
-                d_C_m = self.d_con_mlp1_m(C_m)
+                d_C_r2f = self.d_con_mlp1_cd(d_C_r2f)
+                d_C_f2r = self.d_con_mlp1_cd(d_C_f2r)
+                d_C_g = self.d_con_mlp1(C_g)
+                d_C_m = self.d_con_mlp1(C_m)
 
-                d_C_r2f = self.d_con_mlp2_r2f(d_C_r2f.transpose(2,3)).squeeze(-1).unsqueeze(0)
-                d_C_f2r = self.d_con_mlp2_r2f(d_C_f2r.transpose(2,3)).squeeze(-1).unsqueeze(0)
-                d_C_g = self.d_con_mlp2_g(d_C_g.transpose(1,2)).squeeze(-1).unsqueeze(0)
-                d_C_m = self.d_con_mlp2_m(d_C_m.transpose(1,2)).squeeze(-1).unsqueeze(0)
+                d_C_r2f = self.d_con_mlp2_cd(d_C_r2f.transpose(2,3)).squeeze(-1).unsqueeze(0)
+                d_C_f2r = self.d_con_mlp2_cd(d_C_f2r.transpose(2,3)).squeeze(-1).unsqueeze(0)
+                d_C_g = self.d_con_mlp2(d_C_g.transpose(1,2)).squeeze(-1).unsqueeze(0)
+                d_C_m = self.d_con_mlp2(d_C_m.transpose(1,2)).squeeze(-1).unsqueeze(0)
 
+                d_C_r2f = nn.LogSoftmax(dim=-1)(d_C_r2f)
+                d_C_f2r = nn.LogSoftmax(dim=-1)(d_C_f2r)
                 d_C_r2f = torch.mean(d_C_r2f, dim=-2)
                 d_C_f2r = torch.mean(d_C_f2r, dim=-2)
 
@@ -355,13 +365,13 @@ def train():
                 ###############################################################
 
                 ######################## unconditional ########################
-                d_UC_r = self.d_unc_mlp1_r(real_text).squeeze(-1)
-                d_UC_g = self.d_unc_mlp1_g(fake_text).squeeze(-1)
-                d_UC_m = self.d_unc_mlp1_m(mismatched_text).squeeze(-1)
+                d_UC_r = self.d_unc_mlp1(real_text).squeeze(-1)
+                d_UC_g = self.d_unc_mlp1(fake_text).squeeze(-1)
+                d_UC_m = self.d_unc_mlp1(mismatched_text).squeeze(-1)
 
-                d_UC_r = self.d_unc_mlp2_r(d_UC_r).squeeze(-1).unsqueeze(0)
-                d_UC_g = self.d_unc_mlp2_g(d_UC_g).squeeze(-1).unsqueeze(0)
-                d_UC_m = self.d_unc_mlp2_m(d_UC_m).squeeze(-1).unsqueeze(0)
+                d_UC_r = self.d_unc_mlp2(d_UC_r).squeeze(-1).unsqueeze(0)
+                d_UC_g = self.d_unc_mlp2(d_UC_g).squeeze(-1).unsqueeze(0)
+                d_UC_m = self.d_unc_mlp2(d_UC_m).squeeze(-1).unsqueeze(0)
 
                 d_unc_output = torch.cat((d_UC_r, d_UC_g, d_UC_m), dim=0)
                 ###############################################################
