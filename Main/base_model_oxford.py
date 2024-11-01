@@ -34,10 +34,10 @@ class OxfordDataset(torch.utils.data.Dataset):
 
 def train():
     epochs = 30
-    batch_size = 50
+    batch_size = 40
     optimizer_G_lr = 1e-5
     optimizer_D_lr = 1e-5
-    save_name = '20241101_1e-5'
+    save_name = '20241101_15wan'
     # save_name = '20241028'
     if not os.path.exists('./Model/' + save_name):
         os.makedirs('./Model/' + save_name)
@@ -51,7 +51,7 @@ def train():
     # load data
     data = pd.read_csv(dirPath)
     print("shape of data: ", data.shape)
-    data = data.sample(n=50000, random_state=42, replace=True).reset_index(drop=True)
+    data = data.sample(n=150000, random_state=42, replace=True).reset_index(drop=True)
     # frac = 0.05 ==> 5% of the data = 169904
     # n = 169920 ==> 72 * 2360 = 169920 (F2G)
     # n = 169988 ==> 91 * 1868 = 169988 (G2F)
@@ -636,9 +636,9 @@ def train():
         plt.plot(test_losses_G, label='test_G')
         plt.plot(test_losses_D, label='test_D')
         plt.legend()
-        plt.show()
         # save plot
         plt.savefig('./Model/' + save_name + "/" + save_name + '_loss.png')
+        plt.show()
         ######################################  Save ######################################
 
 if __name__ == '__main__':
